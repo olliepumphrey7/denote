@@ -44,6 +44,14 @@ final class BlockEditorView: NSView {
         webView.evaluateJavaScript("window.editorFocus && window.editorFocus();")
     }
 
+    func insertText(_ text: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: ["text": text]),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return
+        }
+        webView.evaluateJavaScript("window.editorInsertText && window.editorInsertText(\(encoded));")
+    }
+
     @objc func pasteAndMergeFormatting(_ sender: Any?) {
         webView.evaluateJavaScript("document.execCommand('paste');")
     }

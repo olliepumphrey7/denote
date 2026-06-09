@@ -21,10 +21,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private let onClose: (NoteWindowController) -> Void
     private let onChange: () -> Void
     private let editorView = BlockEditorView()
+    private let voiceTranscriber = VoiceTranscriber()
     private let titleLabel = DraggableTitleLabel()
     private let titleButton = NSButton()
     private let titleField = NSTextField()
     private weak var pinButton: NSButton?
+    private weak var micButton: NSButton?
     private var titlePopover: NSPopover?
     private var noteTitle: String
     private var preset: SizePreset
@@ -65,6 +67,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             window.center()
         }
         setupContent()
+        setupVoiceTranscription()
         setupToolbar()
         applyPinnedState()
         loadContent()
@@ -110,6 +113,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     @objc func paintFormat(_ sender: Any?) {
         editorView.paintFormat(sender)
+    }
+
+    @objc func toggleVoiceTranscription(_ sender: Any?) {
+        voiceTranscriber.toggleRecording()
     }
 
     @objc func exportMarkdown(_ sender: Any?) {
@@ -223,6 +230,17 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         window.contentView = container
     }
 
+    private func setupVoiceTranscription() {
+        voiceTranscriber.onTranscript = { [weak self] text in
+            guard let self else { return }
+            self.editorView.insertText(text)
+            self.scheduleAutosave()
+        }
+        voiceTranscriber.onStateChanged = { [weak self] state in
+            self?.updateMicButton(for: state)
+        }
+    }
+
     private func setupToolbar() {
         let toolbar = NSToolbar(identifier: "NoteToolbar")
         toolbar.delegate = self
@@ -304,6 +322,42 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         pinButton.image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: label)
         pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
         pinButton.toolTip = label
+    }
+
+    private func updateMicButton(for state: VoiceTranscriber.State = .idle) {
+        guard let micButton else { return }
+        let label: String
+        let symbol: String
+        let tint: NSColor
+        let isEnabled: Bool
+
+        switch state {
+        case .idle:
+            label = "Start Transcription"
+            symbol = "mic"
+            tint = .secondaryLabelColor
+            isEnabled = true
+        case .recording:
+            label = "Stop Recording"
+            symbol = "stop.circle.fill"
+            tint = .systemRed
+            isEnabled = true
+        case .transcribing:
+            label = "Transcribing..."
+            symbol = "waveform"
+            tint = .controlAccentColor
+            isEnabled = false
+        case .failed(let message):
+            label = "Transcription Failed: \(message)"
+            symbol = "exclamationmark.triangle"
+            tint = .systemOrange
+            isEnabled = true
+        }
+
+        micButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        micButton.contentTintColor = tint
+        micButton.toolTip = label
+        micButton.isEnabled = isEnabled
     }
 
     private func updateTitleButton() {
@@ -487,11 +541,11 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
 extension NoteWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.standardSize, .smallSize, .noteTitle, .pin, .paintFormat, .export, .flexibleSpace]
+        [.standardSize, .smallSize, .noteTitle, .voiceTranscription, .pin, .paintFormat, .export, .flexibleSpace]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.standardSize, .smallSize, .flexibleSpace, .noteTitle, .flexibleSpace, .export, .paintFormat, .pin]
+        [.standardSize, .smallSize, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export, .paintFormat, .pin]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -502,6 +556,8 @@ extension NoteWindowController: NSToolbarDelegate {
             return buttonItem(id: itemIdentifier, label: "Small", symbol: "rectangle.compress.vertical", action: #selector(applySmallSize(_:)))
         case .noteTitle:
             return titleItem(id: itemIdentifier)
+        case .voiceTranscription:
+            return voiceTranscriptionItem(id: itemIdentifier)
         case .pin:
             return pinItem(id: itemIdentifier)
         case .paintFormat:
@@ -542,6 +598,25 @@ extension NoteWindowController: NSToolbarDelegate {
 
         pinButton = button
         updatePinButton()
+        item.toolTip = button.toolTip
+        item.view = button
+        return item
+    }
+
+    private func voiceTranscriptionItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = "Transcribe"
+        item.paletteLabel = "Transcribe"
+        item.visibilityPriority = .high
+
+        let button = NSButton(image: NSImage(), target: self, action: #selector(toggleVoiceTranscription(_:)))
+        button.bezelStyle = .texturedRounded
+        button.controlSize = .small
+        button.imagePosition = .imageOnly
+        button.imageScaling = .scaleProportionallyDown
+
+        micButton = button
+        updateMicButton()
         item.toolTip = button.toolTip
         item.view = button
         return item
@@ -611,6 +686,7 @@ private extension NSToolbarItem.Identifier {
     static let standardSize = NSToolbarItem.Identifier("standardSize")
     static let smallSize = NSToolbarItem.Identifier("smallSize")
     static let noteTitle = NSToolbarItem.Identifier("noteTitle")
+    static let voiceTranscription = NSToolbarItem.Identifier("voiceTranscription")
     static let pin = NSToolbarItem.Identifier("pin")
     static let paintFormat = NSToolbarItem.Identifier("paintFormat")
     static let export = NSToolbarItem.Identifier("export")

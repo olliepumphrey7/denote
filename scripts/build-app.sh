@@ -60,6 +60,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Denote uses the microphone to transcribe your voice into the current note.</string>
 </dict>
 </plist>
 PLIST

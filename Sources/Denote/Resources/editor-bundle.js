@@ -15153,6 +15153,13 @@ var DenoteEditor = (() => {
     window.editorFocus = () => {
       if (view) view.focus();
     };
+    window.editorInsertText = (payload) => {
+      if (!view || !payload?.text) return;
+      const text = String(payload.text);
+      view.focus();
+      view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+      notifyChange();
+    };
     window.editorApplyNormalStyle = () => {
       if (!view) return;
       const { from: from2, to } = view.state.selection;

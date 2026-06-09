@@ -9,16 +9,20 @@ let package = Package(
         .executable(name: "Denote", targets: ["Denote"]),
         .executable(name: "DenoteChecks", targets: ["DenoteChecks"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0")
+    ],
     targets: [
         .executableTarget(
             name: "Denote",
-            dependencies: ["DenoteCore"],
+            dependencies: ["DenoteCore", "WhisperKit"],
             path: "Sources/Denote",
             exclude: ["EditorAssets"],
             resources: [
                 .process("Resources")
             ],
             linkerSettings: [
+                .linkedFramework("AVFoundation"),
                 .linkedFramework("WebKit")
             ]
         ),
