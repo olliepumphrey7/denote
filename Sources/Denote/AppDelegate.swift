@@ -36,6 +36,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "New Small Window", action: #selector(newSmallWindow(_:)), keyEquivalent: ""))
+
+        let recentNotes = storage.recentNotes(limit: 3)
+        if recentNotes.isEmpty == false {
+            menu.addItem(.separator())
+            for note in recentNotes {
+                let item = NSMenuItem(title: note.title, action: #selector(openRecentNote(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = note.url
+                menu.addItem(item)
+            }
+        }
+
         return menu
     }
 
@@ -61,6 +73,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func newSmallWindow(_ sender: Any?) {
         createWindow(preset: .small)
+    }
+
+    @objc func openRecentNote(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        _ = openNoteFile(url)
     }
 
     @objc func exportMarkdown(_ sender: Any?) {
@@ -108,20 +125,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        let title = Self.noteTitle(from: url)
+        let title = NoteStorage.noteTitle(from: url)
         let state = NoteState(id: UUID().uuidString, path: url.path, title: title)
         open(noteState: state)
         saveState()
         NSApp.activate(ignoringOtherApps: true)
         return true
-    }
-
-    private static func noteTitle(from url: URL) -> String {
-        let fileName = url.lastPathComponent
-        if fileName.hasSuffix(".note.json") {
-            return String(fileName.dropLast(".note.json".count))
-        }
-        return url.deletingPathExtension().lastPathComponent
     }
 
     private func saveState() {

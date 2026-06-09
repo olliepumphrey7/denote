@@ -59,4 +59,27 @@ check(FileManager.default.fileExists(atPath: blankURL.path), "Nonblank save crea
 try storage.save(document: blankDocuments[0], to: blankURL)
 check(!FileManager.default.fileExists(atPath: blankURL.path), "Blank save removes existing note file")
 
+let recentStorage = NoteStorage(notesDirectory: root.appendingPathComponent("recent-notes"), appSupportDirectory: root.appendingPathComponent("recent-support"))
+let oldURL = recentStorage.createNoteURL(title: "Old Note")
+let middleURL = recentStorage.createNoteURL(title: "Middle Note")
+let newestURL = recentStorage.createNoteURL(title: "Newest Note")
+let extraURL = recentStorage.createNoteURL(title: "Extra Note")
+let ignoredBlankURL = recentStorage.createNoteURL(title: "Ignored Blank")
+try recentStorage.save(document: EditorDocument(html: "<p>Old</p>", plainText: "Old"), to: oldURL)
+try recentStorage.save(document: EditorDocument(html: "<p>Middle</p>", plainText: "Middle"), to: middleURL)
+try recentStorage.save(document: EditorDocument(html: "<p>Newest</p>", plainText: "Newest"), to: newestURL)
+try recentStorage.save(document: EditorDocument(html: "<p>Extra</p>", plainText: "Extra"), to: extraURL)
+try " ".write(to: ignoredBlankURL, atomically: true, encoding: .utf8)
+
+let calendar = Calendar(identifier: .gregorian)
+let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding: .minute, value: 1, to: baseDate)!], ofItemAtPath: oldURL.path)
+try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding: .minute, value: 2, to: baseDate)!], ofItemAtPath: middleURL.path)
+try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding: .minute, value: 3, to: baseDate)!], ofItemAtPath: newestURL.path)
+try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding: .minute, value: 0, to: baseDate)!], ofItemAtPath: extraURL.path)
+try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding: .minute, value: 4, to: baseDate)!], ofItemAtPath: ignoredBlankURL.path)
+
+let recent = recentStorage.recentNotes(limit: 3)
+check(recent.map(\.title) == ["Newest Note", "Middle Note", "Old Note"], "Recent notes are sorted and limited; got \(recent.map(\.title))")
+
 print("All checks passed.")

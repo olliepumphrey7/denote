@@ -112,6 +112,11 @@ public struct AppState: Codable, Equatable, Sendable {
 }
 
 public final class NoteStorage: @unchecked Sendable {
+    public struct RecentNote: Equatable, Sendable {
+        public let title: String
+        public let url: URL
+    }
+
     public let notesDirectory: URL
     public let stateURL: URL
     private static let adjectives = [
@@ -155,6 +160,33 @@ public final class NoteStorage: @unchecked Sendable {
         }
 
         return nil
+    }
+
+    public func recentNotes(limit: Int = 3) -> [RecentNote] {
+        guard limit > 0,
+              let urls = try? FileManager.default.contentsOfDirectory(
+                at: notesDirectory,
+                includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else {
+            return []
+        }
+
+        return urls
+            .filter { $0.lastPathComponent.hasSuffix(".note.json") }
+            .compactMap { url -> (RecentNote, Date)? in
+                guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey]),
+                      values.isRegularFile == true,
+                      let modified = values.contentModificationDate,
+                      let document = loadDocument(from: url),
+                      document.isBlank == false else {
+                    return nil
+                }
+                return (RecentNote(title: Self.noteTitle(from: url), url: url), modified)
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(limit)
+            .map(\.0)
     }
 
     public func randomNoteTitle() -> String {
@@ -246,6 +278,14 @@ public final class NoteStorage: @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let fallback = cleaned.isEmpty ? "Untitled Note" : cleaned
         return String(fallback.prefix(60))
+    }
+
+    public static func noteTitle(from url: URL) -> String {
+        let fileName = url.lastPathComponent
+        if fileName.hasSuffix(".note.json") {
+            return String(fileName.dropLast(".note.json".count))
+        }
+        return url.deletingPathExtension().lastPathComponent
     }
 }
 
