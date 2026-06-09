@@ -42,4 +42,21 @@ let renamedURL = try storage.renameNote(at: documentURL, id: "document-check", t
 check(renamedURL.lastPathComponent == "Quiet Harbor.note.json", "Renamed note URL is title-only; got \(renamedURL.lastPathComponent)")
 check(storage.loadDocument(from: renamedURL) == document, "Renamed note keeps document contents")
 
+let blankDocuments = [
+    EditorDocument(html: "", plainText: ""),
+    EditorDocument(html: "<p><br></p>", plainText: "\n  \n"),
+    EditorDocument(modelJSON: #"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"   "}]}]}"#, html: "<p>&nbsp;</p>", plainText: "   ")
+]
+for blank in blankDocuments {
+    check(blank.isBlank, "Blank document is detected: \(blank)")
+}
+let contentDocument = EditorDocument(modelJSON: #"{"type":"doc","content":[{"type":"paragraph","content":[{"type":"text","text":"Hello"}]}]}"#, html: "<p>Hello</p>", plainText: "")
+check(!contentDocument.isBlank, "Model JSON text prevents blank detection")
+
+let blankURL = storage.createNoteURL(id: "blank-check", title: "Blank Check")
+try storage.save(document: document, to: blankURL)
+check(FileManager.default.fileExists(atPath: blankURL.path), "Nonblank save creates note file")
+try storage.save(document: blankDocuments[0], to: blankURL)
+check(!FileManager.default.fileExists(atPath: blankURL.path), "Blank save removes existing note file")
+
 print("All checks passed.")

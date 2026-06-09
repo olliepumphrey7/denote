@@ -76,6 +76,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func currentState() -> NoteState? {
         guard let window else { return nil }
+        guard editorView.currentDocument().isBlank == false else { return nil }
         return NoteState(id: noteID, path: noteURL.path, title: noteTitle, frame: NSStringFromRect(window.frame), preset: preset.rawValue, isPinned: isPinned)
     }
 
@@ -199,7 +200,11 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         noteTitle = trimmed.isEmpty ? storage.randomNoteTitle() : trimmed
         updateTitleButton()
         window?.title = noteTitle
-        noteURL = (try? storage.renameNote(at: noteURL, id: noteID, title: noteTitle)) ?? noteURL
+        if editorView.currentDocument().isBlank == false {
+            noteURL = (try? storage.renameNote(at: noteURL, id: noteID, title: noteTitle)) ?? noteURL
+        } else {
+            noteURL = storage.createNoteURL(id: noteID, title: noteTitle)
+        }
         saveNow()
         onChange()
     }
@@ -271,7 +276,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private func saveNow() {
-        try? storage.save(document: editorView.currentDocument(), to: noteURL)
+        let document = editorView.currentDocument()
+        try? storage.save(document: document, to: noteURL)
         onChange()
     }
 

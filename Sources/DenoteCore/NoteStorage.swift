@@ -64,6 +64,43 @@ public struct EditorDocument: Codable, Equatable, Sendable {
         html = try values.decodeIfPresent(String.self, forKey: .html) ?? ""
         plainText = try values.decodeIfPresent(String.self, forKey: .plainText) ?? ""
     }
+
+    public var isBlank: Bool {
+        if plainText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+            return false
+        }
+
+        let htmlText = html
+            .replacingOccurrences(of: #"(?i)<br\s*/?>"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"(?i)</p>|</div>|</li>|</h[1-6]>"#, with: "\n", options: .regularExpression)
+            .replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: "&nbsp;", with: " ")
+            .replacingOccurrences(of: "\u{00a0}", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return htmlText.isEmpty && modelJSONContainsText(modelJSON) == false
+    }
+
+    private func modelJSONContainsText(_ value: String) -> Bool {
+        guard let data = value.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) else {
+            return false
+        }
+        return Self.containsText(in: object)
+    }
+
+    private static func containsText(in object: Any) -> Bool {
+        if let dictionary = object as? [String: Any] {
+            if let text = dictionary["text"] as? String,
+               text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                return true
+            }
+            return dictionary.values.contains { containsText(in: $0) }
+        }
+        if let array = object as? [Any] {
+            return array.contains { containsText(in: $0) }
+        }
+        return false
+    }
 }
 
 public struct AppState: Codable, Equatable, Sendable {
@@ -171,6 +208,11 @@ public final class NoteStorage: @unchecked Sendable {
     }
 
     public func save(document: EditorDocument, to url: URL) throws {
+        if document.isBlank {
+            try deleteNoteIfExists(at: url)
+            return
+        }
+
         try prepare()
         let data = try JSONEncoder.pretty.encode(document)
         try data.write(to: url, options: .atomic)
@@ -179,6 +221,12 @@ public final class NoteStorage: @unchecked Sendable {
     public func loadDocument(from url: URL) -> EditorDocument? {
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(EditorDocument.self, from: data)
+    }
+
+    public func deleteNoteIfExists(at url: URL) throws {
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
     }
 
     private func uniqueNoteURL(title: String, excluding existingURL: URL? = nil) -> URL {
