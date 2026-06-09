@@ -47,6 +47,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         saveState()
     }
 
+    func application(_ sender: NSApplication, openFile filename: String) -> Bool {
+        openNoteFile(URL(fileURLWithPath: filename))
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.forEach { _ = openNoteFile($0) }
+    }
+
     @objc func newWindow(_ sender: Any?) {
         createWindow(preset: .standard)
     }
@@ -85,6 +93,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         controllers.append(controller)
         controller.showWindow(nil)
+    }
+
+    private func openNoteFile(_ url: URL) -> Bool {
+        guard url.pathExtension.lowercased() == "json",
+              storage.loadDocument(from: url) != nil else {
+            return false
+        }
+
+        if let existing = controllers.first(where: { $0.currentState()?.path == url.path }) {
+            existing.showWindow(nil)
+            existing.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return true
+        }
+
+        let title = Self.noteTitle(from: url)
+        let state = NoteState(id: UUID().uuidString, path: url.path, title: title)
+        open(noteState: state)
+        saveState()
+        NSApp.activate(ignoringOtherApps: true)
+        return true
+    }
+
+    private static func noteTitle(from url: URL) -> String {
+        let fileName = url.lastPathComponent
+        if fileName.hasSuffix(".note.json") {
+            return String(fileName.dropLast(".note.json".count))
+        }
+        return url.deletingPathExtension().lastPathComponent
     }
 
     private func saveState() {
