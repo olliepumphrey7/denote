@@ -1,0 +1,23 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:editor": "esbuild Sources/EphemeralNotes/EditorAssets/prosemirror-editor.js --bundle --format=iife --global-name=EphemeralNotesEditor --outfile=Sources/EphemeralNotes/Resources/editor-bundle.js",
+    "test:editor": "node --test tests/editor-behavior.test.js"
+  },
+  "dependencies": {
+    "esbuild": "^0.25.0",
+    "prosemirror-commands": "^1.7.1",
+    "prosemirror-history": "^1.4.1",
+    "prosemirror-inputrules": "^1.5.0",
+    "prosemirror-keymap": "^1.2.3",
+    "prosemirror-model": "^1.25.4",
+    "prosemirror-schema-basic": "^1.2.4",
+    "prosemirror-schema-list": "^1.5.1",
+    "prosemirror-state": "^1.4.4",
+    "prosemirror-tables": "^1.7.1",
+    "prosemirror-view": "^1.41.3",
+    "jsdom": "^26.1.0"
+  },
+  "devDependencies": {}
+}
