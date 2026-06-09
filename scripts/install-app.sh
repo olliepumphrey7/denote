@@ -16,5 +16,6 @@ TARGET_APP="$TARGET_DIR/$APP_NAME.app"
 mkdir -p "$TARGET_DIR"
 rm -rf "$TARGET_APP"
 cp -R "$SOURCE_APP" "$TARGET_APP"
+rm -rf "$SOURCE_APP"
 
 echo "$TARGET_APP"
