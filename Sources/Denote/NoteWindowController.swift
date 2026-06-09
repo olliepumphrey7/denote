@@ -10,7 +10,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         var size: NSSize {
             switch self {
             case .standard: NSSize(width: 720, height: 520)
-            case .small: NSSize(width: 420, height: 300)
+            case .small: NSSize(width: 420, height: 220)
             }
         }
     }
