@@ -13,6 +13,7 @@ swift build -c release
 rm -rf "$BUNDLE"
 mkdir -p "$MACOS" "$CONTENTS/Resources"
 cp ".build/release/Denote" "$MACOS/Denote"
+cp "Brand/Denote.icns" "$CONTENTS/Resources/Denote.icns"
 if [[ -d ".build/arm64-apple-macosx/release/Denote_Denote.bundle" ]]; then
   cp -R ".build/arm64-apple-macosx/release/Denote_Denote.bundle" "$CONTENTS/Resources/"
 elif [[ -d ".build/release/Denote_Denote.bundle" ]]; then
@@ -31,6 +32,8 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
   <key>CFBundleName</key>
   <string>Denote</string>
   <key>CFBundleDisplayName</key>
+  <string>Denote</string>
+  <key>CFBundleIconFile</key>
   <string>Denote</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
