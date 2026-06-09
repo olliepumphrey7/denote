@@ -93,9 +93,9 @@ public final class NoteStorage: @unchecked Sendable {
     public init(
         notesDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Documents")
-            .appendingPathComponent("Ephemeral Notes"),
+            .appendingPathComponent("Denote"),
         appSupportDirectory: URL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Ephemeral Notes")
+            .appendingPathComponent("Denote")
     ) {
         self.notesDirectory = notesDirectory
         self.stateURL = appSupportDirectory.appendingPathComponent("state.json")

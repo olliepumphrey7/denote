@@ -13,7 +13,7 @@ import {
   plainText,
   schema,
   serializeHTML
-} from "../Sources/EphemeralNotes/EditorAssets/prosemirror-editor.js";
+} from "../Sources/Denote/EditorAssets/prosemirror-editor.js";
 
 const dom = new JSDOM("<!doctype html><html><body></body></html>");
 globalThis.window = dom.window;

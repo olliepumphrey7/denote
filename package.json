@@ -1,8 +1,9 @@
 {
+  "name": "denote",
   "private": true,
   "type": "module",
   "scripts": {
-    "build:editor": "esbuild Sources/EphemeralNotes/EditorAssets/prosemirror-editor.js --bundle --format=iife --global-name=EphemeralNotesEditor --outfile=Sources/EphemeralNotes/Resources/editor-bundle.js",
+    "build:editor": "esbuild Sources/Denote/EditorAssets/prosemirror-editor.js --bundle --format=iife --global-name=DenoteEditor --outfile=Sources/Denote/Resources/editor-bundle.js",
     "test:editor": "node --test tests/editor-behavior.test.js"
   },
   "dependencies": {

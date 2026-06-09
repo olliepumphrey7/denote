@@ -1,17 +1,21 @@
-# Ephemeral Notes
+# Denote
 
-Ephemeral Notes is a small native macOS notes app for quick rich-text notes. It opens directly into editable note windows, autosaves each note as a local document, and restores open notes when relaunched.
+Denote is a small native macOS notes app for quick rich-text notes. It opens directly into editable note windows, autosaves each note as a local document, and restores open notes when relaunched.
+
+## Logo Options
+
+![Denote logo option sheet](Brand/denote-logo-options.png)
 
 Notes are saved in:
 
 ```text
-~/Documents/Ephemeral Notes
+~/Documents/Denote
 ```
 
 App window state is saved in:
 
 ```text
-~/Library/Application Support/Ephemeral Notes/state.json
+~/Library/Application Support/Denote/state.json
 ```
 
 ## Features
@@ -47,8 +51,8 @@ Clone the repository:
 
 ```sh
 cd ~/Downloads
-git clone https://github.com/olliepumphrey7/ephemeral-notes.git
-cd ephemeral-notes
+git clone https://github.com/olliepumphrey7/denote.git
+cd denote
 ```
 
 ## Install
@@ -66,7 +70,7 @@ If `/Applications` is not writable, the installer copies the app into `~/Applica
 Open the installed app:
 
 ```sh
-open -a "Ephemeral Notes"
+open -a "Denote"
 ```
 
 If macOS warns that the app is from an unidentified developer, open System Settings, go to Privacy & Security, and allow the app to open. This project currently builds a local unsigned app.
@@ -76,14 +80,14 @@ If macOS warns that the app is from an unidentified developer, open System Setti
 Pull the latest code and reinstall:
 
 ```sh
-cd ~/Downloads/ephemeral-notes
+cd ~/Downloads/denote
 git pull
 npm install
 npm run build:editor
 ./scripts/install-app.sh
 ```
 
-Quit and reopen Ephemeral Notes after updating.
+Quit and reopen Denote after updating.
 
 ## Development
 
@@ -93,12 +97,12 @@ Build and run from the repository:
 npm install
 npm run build:editor
 swift build
-swift run EphemeralNotesChecks
+swift run DenoteChecks
 npm run test:editor
 ./scripts/build-app.sh
-open "dist/Ephemeral Notes.app"
+open "dist/Denote.app"
 ```
 
 ## Notes Format
 
-Each note is stored as a `.note.json` file in `~/Documents/Ephemeral Notes`. The file contains the editor document model, rendered HTML, and plain text fallback. These files are local and are not synced by the app itself.
+Each note is stored as a `.note.json` file in `~/Documents/Denote`. The file contains the editor document model, rendered HTML, and plain text fallback. These files are local and are not synced by the app itself.

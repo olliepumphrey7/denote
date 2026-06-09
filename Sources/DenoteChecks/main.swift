@@ -1,5 +1,5 @@
 import AppKit
-import EphemeralNotesCore
+import DenoteCore
 import Foundation
 
 func check(_ condition: @autoclosure () -> Bool, _ message: String) {

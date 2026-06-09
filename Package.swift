@@ -3,17 +3,17 @@
 import PackageDescription
 
 let package = Package(
-    name: "EphemeralNotes",
+    name: "Denote",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "EphemeralNotes", targets: ["EphemeralNotes"]),
-        .executable(name: "EphemeralNotesChecks", targets: ["EphemeralNotesChecks"])
+        .executable(name: "Denote", targets: ["Denote"]),
+        .executable(name: "DenoteChecks", targets: ["DenoteChecks"])
     ],
     targets: [
         .executableTarget(
-            name: "EphemeralNotes",
-            dependencies: ["EphemeralNotesCore"],
-            path: "Sources/EphemeralNotes",
+            name: "Denote",
+            dependencies: ["DenoteCore"],
+            path: "Sources/Denote",
             exclude: ["EditorAssets"],
             resources: [
                 .process("Resources")
@@ -23,13 +23,13 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "EphemeralNotesChecks",
-            dependencies: ["EphemeralNotesCore"],
-            path: "Sources/EphemeralNotesChecks"
+            name: "DenoteChecks",
+            dependencies: ["DenoteCore"],
+            path: "Sources/DenoteChecks"
         ),
         .target(
-            name: "EphemeralNotesCore",
-            path: "Sources/EphemeralNotesCore"
+            name: "DenoteCore",
+            path: "Sources/DenoteCore"
         )
     ]
 )

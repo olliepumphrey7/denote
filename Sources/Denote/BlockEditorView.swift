@@ -1,5 +1,5 @@
 import AppKit
-import EphemeralNotesCore
+import DenoteCore
 import WebKit
 
 @MainActor
@@ -86,7 +86,7 @@ final class BlockEditorView: NSView {
         let resourceURL = Bundle.main.resourceURL
         let candidateURLs = [
             resourceURL?.appendingPathComponent("\(name).\(fileExtension)"),
-            resourceURL?.appendingPathComponent("EphemeralNotes_EphemeralNotes.bundle").appendingPathComponent("\(name).\(fileExtension)")
+            resourceURL?.appendingPathComponent("Denote_Denote.bundle").appendingPathComponent("\(name).\(fileExtension)")
         ]
 
         for url in candidateURLs.compactMap({ $0 }) {

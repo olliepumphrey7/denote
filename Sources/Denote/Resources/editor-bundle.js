@@ -1,4 +1,4 @@
-var EphemeralNotesEditor = (() => {
+var DenoteEditor = (() => {
   var __defProp = Object.defineProperty;
   var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
   var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -17,7 +17,7 @@ var EphemeralNotesEditor = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // Sources/EphemeralNotes/EditorAssets/prosemirror-editor.js
+  // Sources/Denote/EditorAssets/prosemirror-editor.js
   var prosemirror_editor_exports = {};
   __export(prosemirror_editor_exports, {
     cleanIncomingHTML: () => cleanIncomingHTML,
@@ -14933,7 +14933,7 @@ var EphemeralNotesEditor = (() => {
     });
   }
 
-  // Sources/EphemeralNotes/EditorAssets/prosemirror-editor.js
+  // Sources/Denote/EditorAssets/prosemirror-editor.js
   var tableNodeSpec = tableNodes({
     tableGroup: "block",
     cellContent: "block+",

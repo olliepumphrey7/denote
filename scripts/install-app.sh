@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-APP_NAME="Ephemeral Notes"
+APP_NAME="Denote"
 SOURCE_APP="$ROOT/dist/$APP_NAME.app"
 if [[ -w "/Applications" ]]; then
   TARGET_DIR="/Applications"

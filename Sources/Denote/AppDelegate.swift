@@ -1,5 +1,5 @@
 import AppKit
-import EphemeralNotesCore
+import DenoteCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -104,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(title: "Quit Ephemeral Notes", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        appMenu.addItem(NSMenuItem(title: "Quit Denote", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         appMenuItem.submenu = appMenu
         main.addItem(appMenuItem)
 

@@ -1,5 +1,5 @@
 import AppKit
-import EphemeralNotesCore
+import DenoteCore
 
 @MainActor
 final class EditorTextView: NSTextView {

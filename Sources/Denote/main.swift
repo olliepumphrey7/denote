@@ -1,5 +1,5 @@
 import AppKit
-import EphemeralNotesCore
+import DenoteCore
 
 let app = NSApplication.shared
 let delegate = AppDelegate()
