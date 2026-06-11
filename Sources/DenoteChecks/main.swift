@@ -82,4 +82,141 @@ try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding
 let recent = recentStorage.recentNotes(limit: 3)
 check(recent.map(\.title) == ["Newest Note", "Middle Note", "Old Note"], "Recent notes are sorted and limited; got \(recent.map(\.title))")
 
+func jsonString(_ object: Any) -> String {
+    let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
+    return String(data: data, encoding: .utf8)!
+}
+
+func text(_ value: String, marks: [[String: Any]] = []) -> [String: Any] {
+    var node: [String: Any] = ["type": "text", "text": value]
+    if marks.isEmpty == false {
+        node["marks"] = marks
+    }
+    return node
+}
+
+func node(_ type: String, attrs: [String: Any] = [:], content: [[String: Any]] = []) -> [String: Any] {
+    var value: [String: Any] = ["type": type]
+    if attrs.isEmpty == false {
+        value["attrs"] = attrs
+    }
+    if content.isEmpty == false {
+        value["content"] = content
+    }
+    return value
+}
+
+func document(_ content: [[String: Any]]) -> EditorDocument {
+    EditorDocument(modelJSON: jsonString(["type": "doc", "content": content]), plainText: "fallback")
+}
+
+let richMarkdownDocument = document([
+    node("heading", attrs: ["level": 1], content: [text("Title & Plan")]),
+    node("paragraph", content: [
+        text("Hello "),
+        text("bold", marks: [["type": "strong"]]),
+        text(" and "),
+        text("italic", marks: [["type": "em"]]),
+        text(" with "),
+        text("link", marks: [["type": "link", "attrs": ["href": "https://example.com/docs"]]])
+    ]),
+    node("bullet_list", content: [
+        node("list_item", content: [node("paragraph", content: [text("First")])]),
+        node("list_item", content: [
+            node("paragraph", content: [text("Second")]),
+            node("ordered_list", attrs: ["order": 3], content: [
+                node("list_item", content: [node("paragraph", content: [text("Nested")])])
+            ])
+        ])
+    ])
+])
+let richMarkdown = MarkdownExporter.markdown(from: richMarkdownDocument)
+check(richMarkdown == """
+# Title & Plan
+
+Hello **bold** and *italic* with [link](https://example.com/docs)
+
+- First
+- Second
+  3. Nested
+
+""", "Markdown export preserves core rich document structure; got \(richMarkdown.debugDescription)")
+
+let tableDocument = document([
+    node("table", content: [
+        node("table_row", content: [
+            node("table_header", content: [node("paragraph", content: [text("A")])]),
+            node("table_header", content: [node("paragraph", content: [text("B")])])
+        ]),
+        node("table_row", content: [
+            node("table_cell", content: [node("paragraph", content: [text("One | escaped")])]),
+            node("table_cell", content: [node("paragraph", content: [text("Two")])])
+        ])
+    ])
+])
+let tableMarkdown = MarkdownExporter.markdown(from: tableDocument)
+check(tableMarkdown == """
+| A | B |
+| --- | --- |
+| One \\| escaped | Two |
+
+""", "Markdown export renders simple tables; got \(tableMarkdown.debugDescription)")
+
+let mergedTableDocument = document([
+    node("table", content: [
+        node("table_row", content: [
+            node("table_cell", attrs: ["colspan": 2], content: [node("paragraph", content: [text("Merged <cell>")])])
+        ])
+    ])
+])
+let mergedTableMarkdown = MarkdownExporter.markdown(from: mergedTableDocument)
+check(mergedTableMarkdown == """
+<table>
+  <tr><td colspan="2">Merged &lt;cell&gt;</td></tr>
+</table>
+
+""", "Markdown export preserves merged tables as HTML; got \(mergedTableMarkdown.debugDescription)")
+
+let invalidModelDocument = EditorDocument(modelJSON: "{bad json", html: "<p>ignored</p>", plainText: "Plain fallback\n")
+check(MarkdownExporter.markdown(from: invalidModelDocument) == "Plain fallback\n", "Invalid model JSON falls back to plain text")
+
+var largeContent: [[String: Any]] = []
+largeContent.reserveCapacity(6_000)
+for index in 0..<6_000 {
+    switch index % 12 {
+    case 0:
+        largeContent.append(node("heading", attrs: ["level": 2], content: [text("Section \(index)")]))
+    case 1:
+        largeContent.append(node("bullet_list", content: [
+            node("list_item", content: [node("paragraph", content: [text("Item \(index)")])]),
+            node("list_item", content: [node("paragraph", content: [text("Item \(index + 1)")])])
+        ]))
+    case 2:
+        largeContent.append(node("table", content: [
+            node("table_row", content: [
+                node("table_header", content: [node("paragraph", content: [text("A")])]),
+                node("table_header", content: [node("paragraph", content: [text("B")])])
+            ]),
+            node("table_row", content: [
+                node("table_cell", content: [node("paragraph", content: [text("\(index)")])]),
+                node("table_cell", content: [node("paragraph", content: [text("Value \(index)")])])
+            ])
+        ]))
+    default:
+        largeContent.append(node("paragraph", content: [
+            text("Paragraph \(index) with "),
+            text("bold", marks: [["type": "strong"]]),
+            text(" text and a "),
+            text("link", marks: [["type": "link", "attrs": ["href": "https://example.com/\(index)"]]])
+        ]))
+    }
+}
+let largeDocument = document(largeContent)
+let exportStart = DispatchTime.now().uptimeNanoseconds
+let largeMarkdown = MarkdownExporter.markdown(from: largeDocument)
+let exportElapsed = Double(DispatchTime.now().uptimeNanoseconds - exportStart) / 1_000_000_000
+check(largeMarkdown.contains("## Section 0"), "Large Markdown export includes headings")
+check(largeMarkdown.contains("| A | B |"), "Large Markdown export includes tables")
+check(exportElapsed < 1.5, "Large Markdown export should stay fast; took \(exportElapsed)s")
+
 print("All checks passed.")

@@ -120,8 +120,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     @objc func exportMarkdown(_ sender: Any?) {
-        let document = editorView.currentDocument()
-        export(content: Self.markdown(fromHTML: document.html, plainText: document.plainText), fileExtension: "md")
+        export(content: MarkdownExporter.markdown(from: editorView.currentDocument()), fileExtension: "md")
     }
 
     @objc func exportText(_ sender: Any?) {
@@ -437,105 +436,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         return adjusted
     }
 
-    private static func markdown(fromHTML html: String, plainText: String) -> String {
-        var output = html
-        output = replace(pattern: #"<h1[^>]*>(.*?)</h1>"#, in: output) { "# \(plainTextFromHTML($0))\n\n" }
-        output = replace(pattern: #"<h2[^>]*>(.*?)</h2>"#, in: output) { "## \(plainTextFromHTML($0))\n\n" }
-        output = replace(pattern: #"<h3[^>]*>(.*?)</h3>"#, in: output) { "### \(plainTextFromHTML($0))\n\n" }
-        output = replace(pattern: #"<p[^>]*><br\s*/?></p>"#, in: output) { _ in "\n" }
-        output = replace(pattern: #"<p[^>]*>(.*?)</p>"#, in: output) { "\(inlineMarkdown(fromHTML: $0))\n\n" }
-        output = replace(pattern: #"<li[^>]*>(.*?)</li>"#, in: output) { "- \(inlineMarkdown(fromHTML: $0))\n" }
-        output = output.replacingOccurrences(of: #"</?(ul|ol)[^>]*>"#, with: "\n", options: .regularExpression)
-        output = replaceSimpleTables(in: output)
-        output = output.replacingOccurrences(of: #"<br\s*/?>"#, with: "\n", options: .regularExpression)
-        output = output.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression)
-        output = decodeHTMLEntities(output)
-        output = output.replacingOccurrences(of: #"\n{3,}"#, with: "\n\n", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return output.isEmpty ? plainText : output + "\n"
-    }
-
-    private static func replaceSimpleTables(in html: String) -> String {
-        replace(pattern: #"<table[^>]*>(.*?)</table>"#, in: html) { tableHTML in
-            if tableHTML.range(of: #"rowspan|colspan"#, options: [.regularExpression, .caseInsensitive]) != nil {
-                return "\n\n\(tableHTML)\n\n"
-            }
-            let rowMatches = matches(pattern: #"<tr[^>]*>(.*?)</tr>"#, in: tableHTML)
-            let rows = rowMatches.map { rowHTML in
-                matches(pattern: #"<t[dh][^>]*>(.*?)</t[dh]>"#, in: rowHTML).map { plainTextFromHTML($0) }
-            }.filter { !$0.isEmpty }
-            guard !rows.isEmpty else { return tableHTML }
-            let width = rows.map(\.count).max() ?? 0
-            var markdownRows = rows.map { row in
-                let padded = row + Array(repeating: "", count: max(0, width - row.count))
-                return "| " + padded.joined(separator: " | ") + " |"
-            }
-            markdownRows.insert("| " + Array(repeating: "---", count: width).joined(separator: " | ") + " |", at: min(1, markdownRows.count))
-            return "\n\n" + markdownRows.joined(separator: "\n") + "\n\n"
-        }
-    }
-
-    private static func inlineMarkdown(fromHTML html: String) -> String {
-        var value = html
-        value = replace(pattern: #"<strong[^>]*>(.*?)</strong>|<b[^>]*>(.*?)</b>"#, in: value) { "**\(plainTextFromHTML($0))**" }
-        value = replace(pattern: #"<em[^>]*>(.*?)</em>|<i[^>]*>(.*?)</i>"#, in: value) { "*\(plainTextFromHTML($0))*" }
-        value = replace(pattern: #"<a[^>]*href="([^"]*)"[^>]*>(.*?)</a>"#, in: value) { match in
-            let href = firstCapture(pattern: #"href="([^"]*)""#, in: match) ?? ""
-            return "[\(plainTextFromHTML(match))](\(href))"
-        }
-        return plainTextFromHTML(value)
-    }
-
-    private static func plainTextFromHTML(_ html: String) -> String {
-        decodeHTMLEntities(html.replacingOccurrences(of: #"<[^>]+>"#, with: "", options: .regularExpression))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func replace(pattern: String, in value: String, transform: (String) -> String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
-            return value
-        }
-        let nsValue = value as NSString
-        let matches = regex.matches(in: value, range: NSRange(location: 0, length: nsValue.length)).reversed()
-        var result = value
-        for match in matches {
-            let fragment = nsValue.substring(with: match.range)
-            result = (result as NSString).replacingCharacters(in: match.range, with: transform(fragment))
-        }
-        return result
-    }
-
-    private static func matches(pattern: String, in value: String) -> [String] {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]) else {
-            return []
-        }
-        let nsValue = value as NSString
-        return regex.matches(in: value, range: NSRange(location: 0, length: nsValue.length)).map { nsValue.substring(with: $0.range) }
-    }
-
-    private static func firstCapture(pattern: String, in value: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]),
-              let match = regex.firstMatch(in: value, range: NSRange(location: 0, length: (value as NSString).length)),
-              match.numberOfRanges > 1 else {
-            return nil
-        }
-        return (value as NSString).substring(with: match.range(at: 1))
-    }
-
     private static func escapeHTML(_ value: String) -> String {
         value
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
             .replacingOccurrences(of: "\"", with: "&quot;")
-    }
-
-    private static func decodeHTMLEntities(_ value: String) -> String {
-        guard let data = value.data(using: .utf8),
-              let attributed = try? NSAttributedString(data: data, options: [.documentType: NSAttributedString.DocumentType.html], documentAttributes: nil) else {
-            return value
-        }
-        return attributed.string
     }
 }
 
