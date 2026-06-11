@@ -6,11 +6,37 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     enum SizePreset: String {
         case standard
         case small
+        case minimised
 
         var size: NSSize {
             switch self {
             case .standard: NSSize(width: 720, height: 520)
             case .small: NSSize(width: 420, height: 220)
+            case .minimised: NSSize(width: 420, height: 72)
+            }
+        }
+
+        var next: SizePreset {
+            switch self {
+            case .standard: .small
+            case .small: .minimised
+            case .minimised: .standard
+            }
+        }
+
+        var label: String {
+            switch self {
+            case .standard: "Standard"
+            case .small: "Small"
+            case .minimised: "Minimised"
+            }
+        }
+
+        var symbolName: String {
+            switch self {
+            case .standard: "rectangle"
+            case .small: "rectangle.compress.vertical"
+            case .minimised: "minus.rectangle"
             }
         }
     }
@@ -25,6 +51,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private let titleLabel = DraggableTitleLabel()
     private let titleButton = NSButton()
     private let titleField = NSTextField()
+    private weak var sizeButton: NSButton?
     private weak var pinButton: NSButton?
     private weak var micButton: NSButton?
     private var titlePopover: NSPopover?
@@ -56,7 +83,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 320, height: 220)
+        window.minSize = NSSize(width: 320, height: SizePreset.minimised.size.height)
         window.title = noteTitle
         window.titleVisibility = .hidden
         window.toolbarStyle = .unifiedCompact
@@ -67,6 +94,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             window.center()
         }
         setupContent()
+        applyPresetAppearance()
         setupVoiceTranscription()
         setupToolbar()
         applyPinnedState()
@@ -88,12 +116,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         onClose(self)
     }
 
-    @objc func applyStandardSize(_ sender: Any?) {
-        setPreset(.standard)
-    }
-
-    @objc func applySmallSize(_ sender: Any?) {
-        setPreset(.small)
+    @objc func cycleSizePreset(_ sender: Any?) {
+        setPreset(preset.next)
     }
 
     @objc func togglePinned(_ sender: Any?) {
@@ -109,10 +133,6 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     @objc func applyNormalStyle(_ sender: Any?) {
         editorView.applyNormalStyle(sender)
-    }
-
-    @objc func paintFormat(_ sender: Any?) {
-        editorView.paintFormat(sender)
     }
 
     @objc func toggleVoiceTranscription(_ sender: Any?) {
@@ -301,12 +321,17 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private func setPreset(_ newPreset: SizePreset) {
         preset = newPreset
         guard let window else { return }
+        applyPresetAppearance()
         var frame = window.frame
         frame.origin.y += frame.height - newPreset.size.height
         frame.size = newPreset.size
         window.setFrame(frame, display: true, animate: true)
-        setupToolbar()
+        updateSizeButton()
         onChange()
+    }
+
+    private func applyPresetAppearance() {
+        editorView.isHidden = preset == .minimised
     }
 
     private func applyPinnedState() {
@@ -321,6 +346,15 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         pinButton.image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: label)
         pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
         pinButton.toolTip = label
+    }
+
+    private func updateSizeButton() {
+        guard let sizeButton else { return }
+        let label = "Cycle Window Size: \(preset.label)"
+        sizeButton.image = NSImage(systemSymbolName: preset.symbolName, accessibilityDescription: label)
+            ?? NSImage(systemSymbolName: "rectangle", accessibilityDescription: label)
+            ?? NSImage()
+        sizeButton.toolTip = label
     }
 
     private func updateMicButton(for state: VoiceTranscriber.State = .idle) {
@@ -447,27 +481,23 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
 extension NoteWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.standardSize, .smallSize, .noteTitle, .voiceTranscription, .pin, .paintFormat, .export, .flexibleSpace]
+        [.sizePreset, .noteTitle, .voiceTranscription, .pin, .export, .flexibleSpace]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.standardSize, .smallSize, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export, .paintFormat, .pin]
+        [.sizePreset, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export, .pin]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch itemIdentifier {
-        case .standardSize:
-            return buttonItem(id: itemIdentifier, label: "Standard", symbol: "rectangle", action: #selector(applyStandardSize(_:)))
-        case .smallSize:
-            return buttonItem(id: itemIdentifier, label: "Small", symbol: "rectangle.compress.vertical", action: #selector(applySmallSize(_:)))
+        case .sizePreset:
+            return sizePresetItem(id: itemIdentifier)
         case .noteTitle:
             return titleItem(id: itemIdentifier)
         case .voiceTranscription:
             return voiceTranscriptionItem(id: itemIdentifier)
         case .pin:
             return pinItem(id: itemIdentifier)
-        case .paintFormat:
-            return buttonItem(id: itemIdentifier, label: "Paint Format", symbol: "paintbrush", action: #selector(paintFormat(_:)))
         case .export:
             return exportItem(id: itemIdentifier)
         default:
@@ -475,17 +505,27 @@ extension NoteWindowController: NSToolbarDelegate {
         }
     }
 
-    private func buttonItem(id: NSToolbarItem.Identifier, label: String, symbol: String, action: Selector) -> NSToolbarItem {
+    private func sizePresetItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: id)
-        item.label = label
-        item.paletteLabel = label
-        item.toolTip = label
-        let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage(), target: self, action: action)
+        item.label = "Size"
+        item.paletteLabel = "Cycle Window Size"
+        item.visibilityPriority = .high
+
+        let button = NSButton(image: NSImage(), target: self, action: #selector(cycleSizePreset(_:)))
         button.bezelStyle = .texturedRounded
         button.controlSize = .small
+        button.imagePosition = .imageOnly
         button.imageScaling = .scaleProportionallyDown
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 30),
+            button.heightAnchor.constraint(equalToConstant: 24)
+        ])
+
+        sizeButton = button
+        updateSizeButton()
+        item.toolTip = button.toolTip
         item.view = button
-        item.visibilityPriority = id == .standardSize ? .high : .standard
         return item
     }
 
@@ -589,12 +629,10 @@ extension NoteWindowController: NSToolbarDelegate {
 }
 
 private extension NSToolbarItem.Identifier {
-    static let standardSize = NSToolbarItem.Identifier("standardSize")
-    static let smallSize = NSToolbarItem.Identifier("smallSize")
+    static let sizePreset = NSToolbarItem.Identifier("sizePreset")
     static let noteTitle = NSToolbarItem.Identifier("noteTitle")
     static let voiceTranscription = NSToolbarItem.Identifier("voiceTranscription")
     static let pin = NSToolbarItem.Identifier("pin")
-    static let paintFormat = NSToolbarItem.Identifier("paintFormat")
     static let export = NSToolbarItem.Identifier("export")
 }
 
