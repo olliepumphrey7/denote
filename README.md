@@ -1,6 +1,6 @@
 # Denote
 
-Denote is a small native macOS notes app for quick rich-text notes. It opens directly into editable note windows, autosaves each note as a local document, and restores open notes when relaunched.
+Denote is a small native macOS notes app for focused working notes: keep notes pinned, compact, or collapsed while you work; capture ideas with local voice transcription; paste rich content without losing structure; and export cleanly to Markdown or HTML.
 
 Notes are saved in:
 
@@ -16,18 +16,29 @@ App window state is saved in:
 
 ## Features
 
-- Native macOS app with compact titlebar toolbar.
+### Stay visible
+
+- Pin any note above other windows with the always-hover toggle.
+- Cycle each window through standard, small, and minimised toolbar-only modes.
+- Restore open note windows automatically when Denote relaunches.
+
+### Capture quickly
+
+- Dictate notes with high-quality local voice transcription.
+- Autosave every open note as you work.
+- Use random readable note names and rename from the titlebar chevron.
+
+### Edit without fighting paste
+
 - Rich-text editing backed by ProseMirror.
-- Autosave for every open note.
-- Restart restore for open note windows.
-- One-click window size cycling through standard, small, and minimised toolbar-only modes.
-- Always-hover pin toggle per window.
-- TextEdit-style title rename popover from the titlebar chevron.
-- Random readable note names used in `.note.json` filenames.
-- Rich paste support for tables, merged cells, lists, and browser-rendered formatting.
-- Fast export to Markdown, plain text, or HTML.
+- Better paste handling than native Notes for tables, merged cells, lists, images, and browser-rendered formatting.
 - Formatting shortcuts: `Cmd-B`, `Cmd-I`, `Cmd-1`, `Cmd-2`, `Cmd-3`, and `Cmd-0`.
 - Backslash heading triggers: `\ `, `\\ `, and `\\\ ` for heading levels 1-3.
+
+### Export cleanly
+
+- Fast export to Markdown, plain text, or HTML.
+- Notes are stored locally as `.note.json` files with document structure, rendered HTML, and plain text fallback.
 
 ## Requirements
 
