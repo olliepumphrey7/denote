@@ -13,7 +13,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
         var size: NSSize {
             switch self {
-            case .standard: NSSize(width: 720, height: 520)
+            case .standard: NSSize(width: 660, height: 600)
             case .small: NSSize(width: 420, height: 220)
             }
         }
@@ -34,8 +34,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
         var symbolName: String {
             switch self {
-            case .standard: "rectangle"
-            case .small: "rectangle.compress.vertical"
+            case .standard: "rectangle.compress.vertical"
+            case .small: "rectangle"
             }
         }
     }

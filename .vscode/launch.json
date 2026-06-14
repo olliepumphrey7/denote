@@ -1,0 +1,44 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:denote}",
+            "name": "Debug Denote",
+            "target": "Denote",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug Denote"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:denote}",
+            "name": "Release Denote",
+            "target": "Denote",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release Denote"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:denote}",
+            "name": "Debug DenoteChecks",
+            "target": "DenoteChecks",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug DenoteChecks"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:denote}",
+            "name": "Release DenoteChecks",
+            "target": "DenoteChecks",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release DenoteChecks"
+        }
+    ]
+}
