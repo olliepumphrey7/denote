@@ -185,7 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowItem = NSMenuItem()
         let window = NSMenu(title: "Window")
-        window.addItem(NSMenuItem(title: "Cycle Window Size", action: #selector(NoteWindowController.cycleSizePreset(_:)), keyEquivalent: ""))
+        window.addItem(NSMenuItem(title: "Toggle Window Size", action: #selector(NoteWindowController.toggleSizePreset(_:)), keyEquivalent: ""))
         window.addItem(NSMenuItem(title: "Toggle Always Hover", action: #selector(NoteWindowController.togglePinned(_:)), keyEquivalent: "p"))
         windowItem.submenu = window
         main.addItem(windowItem)

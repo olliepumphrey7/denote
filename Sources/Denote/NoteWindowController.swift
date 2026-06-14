@@ -6,21 +6,22 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     enum SizePreset: String {
         case standard
         case small
-        case minimised
+
+        static func storedValue(_ value: String) -> SizePreset {
+            value == "small" || value == "minimised" ? .small : .standard
+        }
 
         var size: NSSize {
             switch self {
             case .standard: NSSize(width: 720, height: 520)
             case .small: NSSize(width: 420, height: 220)
-            case .minimised: NSSize(width: 420, height: 72)
             }
         }
 
         var next: SizePreset {
             switch self {
             case .standard: .small
-            case .small: .minimised
-            case .minimised: .standard
+            case .small: .standard
             }
         }
 
@@ -28,7 +29,6 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             switch self {
             case .standard: "Standard"
             case .small: "Small"
-            case .minimised: "Minimised"
             }
         }
 
@@ -36,7 +36,6 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             switch self {
             case .standard: "rectangle"
             case .small: "rectangle.compress.vertical"
-            case .minimised: "minus.rectangle"
             }
         }
     }
@@ -65,7 +64,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         self.noteID = noteState.id
         self.noteURL = URL(fileURLWithPath: noteState.path)
         self.noteTitle = noteState.title
-        self.preset = SizePreset(rawValue: noteState.preset) ?? .standard
+        self.preset = SizePreset.storedValue(noteState.preset)
         self.isPinned = noteState.isPinned
         self.onClose = onClose
         self.onChange = onChange
@@ -83,7 +82,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 320, height: SizePreset.minimised.size.height)
+        window.minSize = NSSize(width: 320, height: SizePreset.small.size.height)
         window.title = noteTitle
         window.titleVisibility = .hidden
         window.toolbarStyle = .unifiedCompact
@@ -94,7 +93,6 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             window.center()
         }
         setupContent()
-        applyPresetAppearance()
         setupVoiceTranscription()
         setupToolbar()
         applyPinnedState()
@@ -116,7 +114,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         onClose(self)
     }
 
-    @objc func cycleSizePreset(_ sender: Any?) {
+    @objc func toggleSizePreset(_ sender: Any?) {
         setPreset(preset.next)
     }
 
@@ -321,17 +319,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private func setPreset(_ newPreset: SizePreset) {
         preset = newPreset
         guard let window else { return }
-        applyPresetAppearance()
         var frame = window.frame
         frame.origin.y += frame.height - newPreset.size.height
         frame.size = newPreset.size
         window.setFrame(frame, display: true, animate: true)
         updateSizeButton()
         onChange()
-    }
-
-    private func applyPresetAppearance() {
-        editorView.isHidden = preset == .minimised
     }
 
     private func applyPinnedState() {
@@ -350,7 +343,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     private func updateSizeButton() {
         guard let sizeButton else { return }
-        let label = "Cycle Window Size: \(preset.label)"
+        let label = "Window Size: \(preset.label)"
         sizeButton.image = NSImage(systemSymbolName: preset.symbolName, accessibilityDescription: label)
             ?? NSImage(systemSymbolName: "rectangle", accessibilityDescription: label)
             ?? NSImage()
@@ -485,7 +478,7 @@ extension NoteWindowController: NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sizePreset, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export, .pin]
+        [.sizePreset, .pin, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -508,10 +501,10 @@ extension NoteWindowController: NSToolbarDelegate {
     private func sizePresetItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: id)
         item.label = "Size"
-        item.paletteLabel = "Cycle Window Size"
+        item.paletteLabel = "Toggle Window Size"
         item.visibilityPriority = .high
 
-        let button = NSButton(image: NSImage(), target: self, action: #selector(cycleSizePreset(_:)))
+        let button = NSButton(image: NSImage(), target: self, action: #selector(toggleSizePreset(_:)))
         button.bezelStyle = .texturedRounded
         button.controlSize = .small
         button.imagePosition = .imageOnly
