@@ -129,6 +129,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         editorView.pasteAndMergeFormatting(sender)
     }
 
+    @objc func pasteWithoutFormatting(_ sender: Any?) {
+        editorView.pasteWithoutFormatting(sender)
+    }
+
     @objc func applyNormalStyle(_ sender: Any?) {
         editorView.applyNormalStyle(sender)
     }
@@ -319,12 +323,37 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private func setPreset(_ newPreset: SizePreset) {
         preset = newPreset
         guard let window else { return }
+        editorView.captureViewportAnchor()
         var frame = window.frame
         frame.origin.y += frame.height - newPreset.size.height
         frame.size = newPreset.size
         window.setFrame(frame, display: true, animate: true)
+        restoreViewportAnchorAfterResize()
         updateSizeButton()
         onChange()
+    }
+
+    func windowWillStartLiveResize(_ notification: Notification) {
+        editorView.captureViewportAnchor()
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        editorView.restoreViewportAnchor()
+    }
+
+    func windowDidEndLiveResize(_ notification: Notification) {
+        restoreViewportAnchorAfterResize()
+        onChange()
+    }
+
+    private func restoreViewportAnchorAfterResize() {
+        editorView.restoreViewportAnchor()
+        DispatchQueue.main.async { [weak self] in
+            self?.editorView.restoreViewportAnchor()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            self?.editorView.restoreViewportAnchor()
+        }
     }
 
     private func applyPinnedState() {

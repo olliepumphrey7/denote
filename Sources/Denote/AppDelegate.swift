@@ -92,6 +92,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         frontController()?.exportHTML(sender)
     }
 
+    @objc func pasteWithoutFormatting(_ sender: Any?) {
+        frontController()?.pasteWithoutFormatting(sender)
+    }
+
     private func createWindow(preset: NoteWindowController.SizePreset) {
         let id = UUID().uuidString
         let title = storage.randomNoteTitle()
@@ -179,7 +183,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         edit.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
         edit.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         edit.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
-        edit.addItem(NSMenuItem(title: "Paste and Merge Formatting", action: #selector(BlockEditorView.pasteAndMergeFormatting(_:)), keyEquivalent: "V"))
+        let pasteWithoutFormatting = NSMenuItem(title: "Paste Without Formatting", action: #selector(AppDelegate.pasteWithoutFormatting(_:)), keyEquivalent: "V")
+        pasteWithoutFormatting.target = self
+        edit.addItem(pasteWithoutFormatting)
         editItem.submenu = edit
         main.addItem(editItem)
 

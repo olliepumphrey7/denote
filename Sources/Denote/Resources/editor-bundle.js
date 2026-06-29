@@ -20,6 +20,7 @@ var DenoteEditor = (() => {
   // Sources/Denote/EditorAssets/prosemirror-editor.js
   var prosemirror_editor_exports = {};
   __export(prosemirror_editor_exports, {
+    captureViewportAnchor: () => captureViewportAnchor,
     cleanIncomingHTML: () => cleanIncomingHTML,
     createEditorState: () => createEditorState,
     deleteSelectedTable: () => deleteSelectedTable,
@@ -31,6 +32,7 @@ var DenoteEditor = (() => {
     makePlugins: () => makePlugins,
     normalizeDocumentTransaction: () => normalizeDocumentTransaction,
     plainText: () => plainText,
+    restoreViewportAnchor: () => restoreViewportAnchor,
     schema: () => schema2,
     serializeHTML: () => serializeHTML
   });
@@ -14965,6 +14967,9 @@ var DenoteEditor = (() => {
   ];
   var view;
   var suppressChange = false;
+  var rememberedViewportAnchor = null;
+  var viewportAnchorFrame = 0;
+  var viewportRestoreFrame = 0;
   function post(name, payload = {}) {
     window.webkit.messageHandlers[name].postMessage(payload);
   }
@@ -14983,6 +14988,62 @@ var DenoteEditor = (() => {
       modelJSON: JSON.stringify(view.state.doc.toJSON()),
       html: serializeHTML(view.state.doc),
       plainText: plainText(view.state.doc)
+    });
+  }
+  function captureViewportAnchor() {
+    if (!view) return null;
+    const targetY = Math.max(0, Math.min(window.innerHeight - 1, window.innerHeight / 2));
+    const targetX = Math.max(0, Math.min(window.innerWidth - 1, window.innerWidth / 2));
+    const position = view.posAtCoords({ left: targetX, top: targetY }) || { pos: view.state.selection.head };
+    try {
+      const coords = view.coordsAtPos(position.pos);
+      return {
+        pos: position.pos,
+        targetY,
+        topOffset: coords.top - targetY
+      };
+    } catch {
+      return {
+        pos: view.state.selection.head,
+        targetY,
+        topOffset: 0
+      };
+    }
+  }
+  function rememberViewportAnchor() {
+    rememberedViewportAnchor = captureViewportAnchor() || rememberedViewportAnchor;
+    return rememberedViewportAnchor;
+  }
+  function scheduleViewportAnchorCapture() {
+    if (viewportAnchorFrame) cancelAnimationFrame(viewportAnchorFrame);
+    viewportAnchorFrame = requestAnimationFrame(() => {
+      viewportAnchorFrame = 0;
+      rememberViewportAnchor();
+    });
+  }
+  function restoreViewportAnchor(anchor = rememberedViewportAnchor) {
+    if (!view || !anchor) return false;
+    const pos = Math.max(0, Math.min(anchor.pos, view.state.doc.content.size));
+    try {
+      const coords = view.coordsAtPos(pos);
+      window.scrollBy(0, coords.top - anchor.targetY - anchor.topOffset);
+      rememberedViewportAnchor = {
+        ...anchor,
+        pos
+      };
+      return true;
+    } catch {
+      view.dispatch(view.state.tr.scrollIntoView());
+      return false;
+    }
+  }
+  function scheduleViewportAnchorRestore() {
+    if (!rememberedViewportAnchor) return;
+    if (viewportRestoreFrame) cancelAnimationFrame(viewportRestoreFrame);
+    viewportRestoreFrame = requestAnimationFrame(() => {
+      viewportRestoreFrame = 0;
+      restoreViewportAnchor();
+      setTimeout(() => restoreViewportAnchor(), 60);
     });
   }
   function cleanIncomingHTML(html) {
@@ -15136,11 +15197,14 @@ var DenoteEditor = (() => {
     view = new EditorView(host, {
       state: createEditorState(),
       dispatchTransaction(transaction) {
+        rememberViewportAnchor();
         const nextState = view.state.apply(transaction);
         view.updateState(nextState);
         notifyChange();
+        scheduleViewportAnchorCapture();
       }
     });
+    rememberViewportAnchor();
   }
   if (globalThis.window) {
     window.editorSetDocument = (payload) => {
@@ -15149,9 +15213,16 @@ var DenoteEditor = (() => {
       view.updateState(createEditorState(doc3));
       suppressChange = false;
       notifyChange();
+      scheduleViewportAnchorCapture();
     };
     window.editorFocus = () => {
       if (view) view.focus();
+    };
+    window.editorCaptureViewportAnchor = () => {
+      rememberViewportAnchor();
+    };
+    window.editorRestoreViewportAnchor = () => {
+      restoreViewportAnchor();
     };
     window.editorInsertText = (payload) => {
       if (!view || !payload?.text) return;
@@ -15159,6 +15230,16 @@ var DenoteEditor = (() => {
       view.focus();
       view.dispatch(view.state.tr.insertText(text).scrollIntoView());
       notifyChange();
+      scheduleViewportAnchorCapture();
+    };
+    window.editorPastePlainText = (payload) => {
+      if (!view) return;
+      const text = String(payload?.text || "");
+      if (!text) return;
+      view.focus();
+      view.dispatch(view.state.tr.insertText(text).scrollIntoView());
+      notifyChange();
+      scheduleViewportAnchorCapture();
     };
     window.editorApplyNormalStyle = () => {
       if (!view) return;
@@ -15184,6 +15265,8 @@ var DenoteEditor = (() => {
       const command = commands[name];
       if (command) command(view.state, view.dispatch, view);
     };
+    window.addEventListener("scroll", scheduleViewportAnchorCapture, { passive: true });
+    window.addEventListener("resize", scheduleViewportAnchorRestore);
   }
   if (globalThis.window?.webkit?.messageHandlers) {
     createEditor();

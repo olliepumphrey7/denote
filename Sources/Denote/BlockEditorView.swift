@@ -52,8 +52,25 @@ final class BlockEditorView: NSView {
         webView.evaluateJavaScript("window.editorInsertText && window.editorInsertText(\(encoded));")
     }
 
+    func captureViewportAnchor() {
+        webView.evaluateJavaScript("window.editorCaptureViewportAnchor && window.editorCaptureViewportAnchor();")
+    }
+
+    func restoreViewportAnchor() {
+        webView.evaluateJavaScript("window.editorRestoreViewportAnchor && window.editorRestoreViewportAnchor();")
+    }
+
     @objc func pasteAndMergeFormatting(_ sender: Any?) {
         webView.evaluateJavaScript("document.execCommand('paste');")
+    }
+
+    @objc func pasteWithoutFormatting(_ sender: Any?) {
+        guard let text = NSPasteboard.general.string(forType: .string),
+              let data = try? JSONSerialization.data(withJSONObject: ["text": text]),
+              let encoded = String(data: data, encoding: .utf8) else {
+            return
+        }
+        webView.evaluateJavaScript("window.editorPastePlainText && window.editorPastePlainText(\(encoded));")
     }
 
     @objc func applyNormalStyle(_ sender: Any?) {
