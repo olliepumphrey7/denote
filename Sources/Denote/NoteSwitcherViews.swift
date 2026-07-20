@@ -156,6 +156,8 @@ final class OrbitSwitcherOverlayView: NSView {
     var onHoverChanged: ((Bool) -> Void)?
 
     private var itemButtons: [OrbitItemButton] = []
+    private let upperRailUnderlay = NSView()
+    private let lowerRailUnderlay = NSView()
     private let namePill = NSVisualEffectView()
     private let nameLabel = NSTextField(labelWithString: "")
     private var trackingAreaReference: NSTrackingArea?
@@ -165,6 +167,8 @@ final class OrbitSwitcherOverlayView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
+        setupRailUnderlay(upperRailUnderlay)
+        setupRailUnderlay(lowerRailUnderlay)
         setupNamePill()
     }
 
@@ -210,7 +214,9 @@ final class OrbitSwitcherOverlayView: NSView {
     }
 
     func isInteractive(at point: NSPoint) -> Bool {
-        itemButtons.contains { $0.frame.insetBy(dx: -5, dy: -5).contains(point) }
+        if upperRailUnderlay.isHidden == false, upperRailUnderlay.frame.contains(point) { return true }
+        if lowerRailUnderlay.isHidden == false, lowerRailUnderlay.frame.contains(point) { return true }
+        return itemButtons.contains { $0.frame.insetBy(dx: -5, dy: -5).contains(point) }
     }
 
     func configure(
@@ -269,16 +275,20 @@ final class OrbitSwitcherOverlayView: NSView {
         }
         placements.append((nil, NSPoint(x: 0, y: addOffset)))
 
-        for (index, placement) in placements.enumerated() {
-            let entry = placement.0
-            let offset = placement.1
-            let button = OrbitItemButton(item: entry)
-            let destination = NSRect(
-                x: anchor.x + offset.x - 13,
-                y: anchor.y + offset.y - 13,
+        let destinationFrames = placements.map { placement in
+            NSRect(
+                x: anchor.x + placement.1.x - 13,
+                y: anchor.y + placement.1.y - 13,
                 width: 26,
                 height: 26
             )
+        }
+        configureRailUnderlays(for: destinationFrames, anchor: anchor)
+
+        for (index, placement) in placements.enumerated() {
+            let entry = placement.0
+            let button = OrbitItemButton(item: entry)
+            let destination = destinationFrames[index]
             button.frame = animated ? NSRect(x: anchor.x - 2, y: anchor.y - 2, width: 4, height: 4) : destination
             button.alphaValue = animated ? 0 : 1
             button.onActivate = { [weak self] sender in
@@ -305,6 +315,45 @@ final class OrbitSwitcherOverlayView: NSView {
             }
         }
         setAccessibilityLabel("Note switcher")
+    }
+
+    private func setupRailUnderlay(_ view: NSView) {
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 16
+        view.layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.78).cgColor
+        view.layer?.borderWidth = 0.5
+        view.layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.22).cgColor
+        view.isHidden = true
+        addSubview(view)
+    }
+
+    private func configureRailUnderlays(for buttonFrames: [NSRect], anchor: NSPoint) {
+        let upperFrames = buttonFrames.filter { $0.midY > anchor.y }
+        let lowerFrames = buttonFrames.filter { $0.midY < anchor.y }
+        if let upperEdge = upperFrames.map(\.maxY).max() {
+            upperRailUnderlay.frame = NSRect(
+                x: anchor.x - 21,
+                y: anchor.y + 17,
+                width: 42,
+                height: upperEdge - anchor.y - 11
+            )
+            upperRailUnderlay.isHidden = false
+        } else {
+            upperRailUnderlay.isHidden = true
+        }
+        if let lowerEdge = lowerFrames.map(\.minY).min() {
+            lowerRailUnderlay.frame = NSRect(
+                x: anchor.x - 21,
+                y: lowerEdge - 6,
+                width: 42,
+                height: anchor.y - lowerEdge - 11
+            )
+            lowerRailUnderlay.isHidden = false
+        } else {
+            lowerRailUnderlay.isHidden = true
+        }
+        addSubview(upperRailUnderlay, positioned: .below, relativeTo: namePill)
+        addSubview(lowerRailUnderlay, positioned: .below, relativeTo: namePill)
     }
 
     private func setupNamePill() {
