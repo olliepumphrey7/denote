@@ -5,16 +5,23 @@ import DenoteCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let storage = NoteStorage()
     private var controllers: [NoteWindowController] = []
+    private var showsHoverIcons = true
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = makeMainMenu()
         try? storage.prepare()
 
-        let restored = storage.readState().notes
+        let savedState = storage.readState()
+        showsHoverIcons = savedState.showsHoverIcons
+        let restored = savedState.notes
             .compactMap { state -> NoteState? in
-                guard let existingURL = storage.existingURL(for: state) else { return nil }
                 var state = state
+                let existingURL = storage.existingURL(for: state) ?? state.switcherPaths
+                    .map { URL(fileURLWithPath: $0) }
+                    .first(where: { FileManager.default.fileExists(atPath: $0.path) })
+                guard let existingURL else { return nil }
                 state.path = existingURL.path
+                state.title = NoteStorage.noteTitle(from: existingURL)
                 if state.title == "Untitled Note" {
                     state.title = storage.randomNoteTitle()
                 }
@@ -36,6 +43,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let menu = NSMenu()
         menu.addItem(NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "New Small Window", action: #selector(newSmallWindow(_:)), keyEquivalent: ""))
+        menu.addItem(.separator())
+        let hoverIcons = NSMenuItem(title: "Show Hover Icons", action: #selector(toggleHoverIcons(_:)), keyEquivalent: "")
+        hoverIcons.target = self
+        hoverIcons.state = showsHoverIcons ? .on : .off
+        menu.addItem(hoverIcons)
 
         let recentNotes = storage.recentNotes(limit: 3)
         if recentNotes.isEmpty == false {
@@ -80,6 +92,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = openNoteFile(url)
     }
 
+    @objc func toggleHoverIcons(_ sender: Any?) {
+        showsHoverIcons.toggle()
+        controllers.forEach { $0.setHoverIconEnabled(showsHoverIcons) }
+        saveState()
+    }
+
     @objc func exportMarkdown(_ sender: Any?) {
         frontController()?.exportMarkdown(sender)
     }
@@ -106,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func open(noteState: NoteState) {
-        let controller = NoteWindowController(storage: storage, noteState: noteState) { [weak self] controller in
+        let controller = NoteWindowController(storage: storage, noteState: noteState, showsHoverIcon: showsHoverIcons) { [weak self] controller in
             self?.controllers.removeAll { $0 === controller }
             self?.saveState()
         } onChange: { [weak self] in
@@ -139,7 +157,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func saveState() {
         let notes = controllers.compactMap { $0.currentState() }
-        try? storage.writeState(AppState(notes: notes))
+        try? storage.writeState(AppState(notes: notes, showsHoverIcons: showsHoverIcons))
     }
 
     private func frontController() -> NoteWindowController? {

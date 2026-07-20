@@ -29,9 +29,26 @@ check(font.pointSize == MarkdownCodec.bodyFontSize, "Normal style uses body font
 
 let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
 let storage = NoteStorage(notesDirectory: root.appendingPathComponent("notes"), appSupportDirectory: root.appendingPathComponent("support"))
-let state = AppState(notes: [NoteState(id: "abc", path: "/tmp/abc.md", frame: "{{0, 0}, {10, 10}}", preset: "small", isPinned: true)])
+let state = AppState(notes: [NoteState(
+    id: "abc",
+    path: "/tmp/abc.md",
+    frame: "{{0, 0}, {10, 10}}",
+    preset: "small",
+    isPinned: true,
+    switcherPaths: ["/tmp/abc.md", "/tmp/meeting.note.json"],
+    floatingAnchor: "{120, 240}"
+)], showsHoverIcons: false)
 try storage.writeState(state)
 check(storage.readState() == state, "State round trip works")
+
+let legacyAppStateData = #"{"notes":[]}"#.data(using: .utf8)!
+let legacyAppState = try JSONDecoder().decode(AppState.self, from: legacyAppStateData)
+check(legacyAppState.showsHoverIcons, "Legacy app state enables hover icons by default")
+
+let legacyStateData = #"{"id":"legacy","path":"/tmp/legacy.note.json","title":"Legacy","preset":"standard","isPinned":false}"#.data(using: .utf8)!
+let legacyState = try JSONDecoder().decode(NoteState.self, from: legacyStateData)
+check(legacyState.switcherPaths.isEmpty, "Legacy state decodes with an empty switcher")
+check(legacyState.floatingAnchor == nil, "Legacy state decodes without a floating anchor")
 
 let documentURL = storage.createNoteURL(id: "document-check", title: "Bright Beacon")
 check(documentURL.lastPathComponent == "Bright Beacon.note.json", "Note URL is title-only; got \(documentURL.lastPathComponent)")

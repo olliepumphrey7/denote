@@ -7,14 +7,27 @@ public struct NoteState: Codable, Equatable, Sendable {
     public var frame: String?
     public var preset: String
     public var isPinned: Bool
+    public var switcherPaths: [String]
+    public var floatingAnchor: String?
 
-    public init(id: String, path: String, title: String = "Untitled Note", frame: String? = nil, preset: String = "standard", isPinned: Bool = false) {
+    public init(
+        id: String,
+        path: String,
+        title: String = "Untitled Note",
+        frame: String? = nil,
+        preset: String = "standard",
+        isPinned: Bool = false,
+        switcherPaths: [String] = [],
+        floatingAnchor: String? = nil
+    ) {
         self.id = id
         self.path = path
         self.title = title
         self.frame = frame
         self.preset = preset
         self.isPinned = isPinned
+        self.switcherPaths = switcherPaths
+        self.floatingAnchor = floatingAnchor
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -24,6 +37,8 @@ public struct NoteState: Codable, Equatable, Sendable {
         case frame
         case preset
         case isPinned
+        case switcherPaths
+        case floatingAnchor
     }
 
     public init(from decoder: Decoder) throws {
@@ -34,6 +49,8 @@ public struct NoteState: Codable, Equatable, Sendable {
         frame = try values.decodeIfPresent(String.self, forKey: .frame)
         preset = try values.decodeIfPresent(String.self, forKey: .preset) ?? "standard"
         isPinned = try values.decodeIfPresent(Bool.self, forKey: .isPinned) ?? false
+        switcherPaths = try values.decodeIfPresent([String].self, forKey: .switcherPaths) ?? []
+        floatingAnchor = try values.decodeIfPresent(String.self, forKey: .floatingAnchor)
     }
 }
 
@@ -105,9 +122,22 @@ public struct EditorDocument: Codable, Equatable, Sendable {
 
 public struct AppState: Codable, Equatable, Sendable {
     public var notes: [NoteState]
+    public var showsHoverIcons: Bool
 
-    public init(notes: [NoteState] = []) {
+    public init(notes: [NoteState] = [], showsHoverIcons: Bool = true) {
         self.notes = notes
+        self.showsHoverIcons = showsHoverIcons
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case notes
+        case showsHoverIcons
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        notes = try values.decodeIfPresent([NoteState].self, forKey: .notes) ?? []
+        showsHoverIcons = try values.decodeIfPresent(Bool.self, forKey: .showsHoverIcons) ?? true
     }
 }
 

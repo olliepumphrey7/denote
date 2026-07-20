@@ -1,8 +1,15 @@
 import AppKit
 import DenoteCore
+import QuartzCore
 
 @MainActor
 final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+    private struct SwitcherLayout {
+        let size: NSSize
+        let anchor: NSPoint
+        let placement: NoteSwitcherPlacement
+    }
+
     enum SizePreset: String {
         case standard
         case small
@@ -41,33 +48,72 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private let storage: NoteStorage
-    private let noteID: String
+    private var noteID: String
     private var noteURL: URL
     private let onClose: (NoteWindowController) -> Void
     private let onChange: () -> Void
     private let editorView = BlockEditorView()
     private let voiceTranscriber = VoiceTranscriber()
+    private let initialButton = InitialBadgeButton()
     private let titleLabel = DraggableTitleLabel()
     private let titleButton = NSButton()
     private let titleField = NSTextField()
     private weak var sizeButton: NSButton?
     private weak var pinButton: NSButton?
     private weak var micButton: NSButton?
+    private weak var titleSwitcherView: NSVisualEffectView?
+    private weak var orbitSwitcherView: OrbitSwitcherOverlayView?
+    private var orbitWindow: NSPanel?
     private var titlePopover: NSPopover?
+    private var orbitHideTimer: Timer?
+    private var isInitialHovered = false
+    private var isOrbitItemHovered = false
+    private var noteSlots: [NoteSwitcherItem] = []
+    private var floatingWindow: NSPanel?
+    private var floatingView: FloatingSwitcherView?
+    private var floatingHideTimer: Timer?
+    private var isFloatingExpanded = false
+    private var floatingAnchorOnScreen: NSPoint?
+    private var floatingSwitcherAnchor = NSPoint(x: 24, y: 24)
+    private var floatingPlacement: NoteSwitcherPlacement = .balanced
+    private var localClickAwayMonitor: Any?
+    private var globalClickAwayMonitor: Any?
     private var noteTitle: String
     private var preset: SizePreset
     private var isPinned: Bool
+    private var showsHoverIcon: Bool
     private var autosaveTimer: Timer?
 
-    init(storage: NoteStorage, noteState: NoteState, onClose: @escaping (NoteWindowController) -> Void, onChange: @escaping () -> Void) {
+    init(
+        storage: NoteStorage,
+        noteState: NoteState,
+        showsHoverIcon: Bool,
+        onClose: @escaping (NoteWindowController) -> Void,
+        onChange: @escaping () -> Void
+    ) {
         self.storage = storage
         self.noteID = noteState.id
         self.noteURL = URL(fileURLWithPath: noteState.path)
         self.noteTitle = noteState.title
         self.preset = SizePreset.storedValue(noteState.preset)
         self.isPinned = noteState.isPinned
+        self.showsHoverIcon = showsHoverIcon
+        self.floatingAnchorOnScreen = noteState.floatingAnchor.map(NSPointFromString)
         self.onClose = onClose
         self.onChange = onChange
+        self.noteSlots = noteState.switcherPaths.compactMap { path in
+            let url = URL(fileURLWithPath: path)
+            guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+            return NoteSwitcherItem(title: NoteStorage.noteTitle(from: url), url: url)
+        }
+        var includesCurrentNote = false
+        for slot in self.noteSlots where slot.url.standardizedFileURL == self.noteURL.standardizedFileURL {
+            includesCurrentNote = true
+            break
+        }
+        if includesCurrentNote == false {
+            self.noteSlots.insert(NoteSwitcherItem(title: self.noteTitle, url: self.noteURL), at: 0)
+        }
 
         let rect: NSRect
         if let frame = noteState.frame {
@@ -76,7 +122,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             rect = NSRect(origin: .zero, size: preset.size)
         }
 
-        let window = NSWindow(
+        let window = NoteWindow(
             contentRect: rect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
@@ -89,6 +135,11 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         window.titlebarSeparatorStyle = .none
         super.init(window: window)
         window.delegate = self
+        window.onMiniaturize = { [weak self] in
+            guard let self, self.showsHoverIcon else { return false }
+            self.collapseToFloatingInitial()
+            return true
+        }
         if noteState.frame == nil {
             window.center()
         }
@@ -97,6 +148,9 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         setupToolbar()
         applyPinnedState()
         loadContent()
+        if showsHoverIcon {
+            DispatchQueue.main.async { [weak self] in self?.ensureFloatingControl() }
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -105,11 +159,25 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func currentState() -> NoteState? {
         guard let window else { return nil }
-        guard editorView.currentDocument().isBlank == false else { return nil }
-        return NoteState(id: noteID, path: noteURL.path, title: noteTitle, frame: NSStringFromRect(window.frame), preset: preset.rawValue, isPinned: isPinned)
+        guard editorView.currentDocument().isBlank == false || noteSlots.count > 1 else { return nil }
+        return NoteState(
+            id: noteID,
+            path: noteURL.path,
+            title: noteTitle,
+            frame: NSStringFromRect(window.frame),
+            preset: preset.rawValue,
+            isPinned: isPinned,
+            switcherPaths: noteSlots.map(\.url.path),
+            floatingAnchor: floatingAnchorOnScreen.map(NSStringFromPoint)
+        )
     }
 
     func windowWillClose(_ notification: Notification) {
+        orbitHideTimer?.invalidate()
+        floatingHideTimer?.invalidate()
+        stopClickAwayMonitoring()
+        closeOrbit(animated: false)
+        removeFloatingControl()
         saveNow()
         onClose(self)
     }
@@ -123,6 +191,17 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         applyPinnedState()
         updatePinButton()
         onChange()
+    }
+
+    func setHoverIconEnabled(_ enabled: Bool) {
+        guard enabled != showsHoverIcon else { return }
+        showsHoverIcon = enabled
+        if enabled {
+            ensureFloatingControl()
+        } else {
+            if window?.isVisible == false { restoreFromFloatingInitial() }
+            removeFloatingControl()
+        }
     }
 
     @objc func pasteAndMergeFormatting(_ sender: Any?) {
@@ -225,16 +304,19 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     private func updateTitle(from rawTitle: String) {
         let trimmed = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        let oldURL = noteURL
         noteTitle = trimmed.isEmpty ? storage.randomNoteTitle() : trimmed
-        updateTitleButton()
-        window?.title = noteTitle
         if editorView.currentDocument().isBlank == false {
             noteURL = (try? storage.renameNote(at: noteURL, id: noteID, title: noteTitle)) ?? noteURL
         } else {
             noteURL = storage.createNoteURL(id: noteID, title: noteTitle)
         }
+        updateCurrentSlot(from: oldURL)
+        updateTitleButton()
+        window?.title = noteTitle
         saveNow()
         onChange()
+        refreshOpenSwitchers()
     }
 
     private func setupContent() {
@@ -276,6 +358,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         titleLabel.alignment = .center
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        initialButton.onHoverChanged = { [weak self] hovered in
+            self?.setInitialHovered(hovered)
+        }
+        initialButton.onStep = { [weak self] direction in self?.stepSwitcher(by: direction) }
+        initialButton.target = self
+        initialButton.action = #selector(revealOrbit(_:))
 
         titleButton.isBordered = false
         titleButton.bezelStyle = .inline
@@ -285,8 +373,270 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         titleButton.controlSize = .small
         titleButton.target = self
         titleButton.action = #selector(showTitlePopover(_:))
-        titleButton.toolTip = "Rename \(noteTitle)"
         updateTitleButton()
+    }
+
+    @objc private func revealOrbit(_ sender: Any?) {
+        orbitHideTimer?.invalidate()
+        showOrbit(animated: orbitSwitcherView == nil)
+    }
+
+    private func setInitialHovered(_ hovered: Bool) {
+        isInitialHovered = hovered
+        if hovered {
+            orbitHideTimer?.invalidate()
+            showOrbit(animated: orbitSwitcherView == nil)
+        } else {
+            scheduleOrbitClose()
+        }
+    }
+
+    private func setOrbitItemHovered(_ hovered: Bool) {
+        isOrbitItemHovered = hovered
+        if hovered {
+            orbitHideTimer?.invalidate()
+        } else {
+            scheduleOrbitClose()
+        }
+    }
+
+    private func showOrbit(animated: Bool) {
+        guard let window else { return }
+        let anchorInWindow = initialButton.convert(
+            NSPoint(x: initialButton.bounds.midX, y: initialButton.bounds.midY),
+            to: nil
+        )
+        let anchorOnScreen = window.convertPoint(toScreen: anchorInWindow)
+        let layout = switcherLayout(around: anchorOnScreen)
+        let panelSize = layout.size
+        let localAnchor = layout.anchor
+        let panelFrame = NSRect(
+            x: anchorOnScreen.x - localAnchor.x,
+            y: anchorOnScreen.y - localAnchor.y,
+            width: panelSize.width,
+            height: panelSize.height
+        )
+
+        if let orbitSwitcherView, let orbitWindow {
+            orbitWindow.setFrame(panelFrame, display: true)
+            orbitSwitcherView.frame = NSRect(origin: .zero, size: panelSize)
+            orbitSwitcherView.configure(
+                items: noteSlots,
+                activeURL: noteURL,
+                anchor: localAnchor,
+                placement: layout.placement,
+                animated: animated
+            )
+            return
+        }
+
+        let panel = NSPanel(
+            contentRect: panelFrame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = window.level
+        panel.hidesOnDeactivate = false
+        panel.collectionBehavior = [.fullScreenAuxiliary]
+
+        let overlay = OrbitSwitcherOverlayView(frame: NSRect(origin: .zero, size: panelSize))
+        overlay.autoresizingMask = [.width, .height]
+        overlay.onSelect = { [weak self] item in
+            self?.switchToNote(item)
+            self?.showOrbit(animated: false)
+        }
+        overlay.onAdd = { [weak self] sender in self?.showSwitcherMenu(relativeTo: sender) }
+        overlay.onStep = { [weak self] direction in self?.stepSwitcher(by: direction) }
+        overlay.onHoverChanged = { [weak self] hovered in self?.setOrbitItemHovered(hovered) }
+        panel.contentView = overlay
+        window.addChildWindow(panel, ordered: .above)
+        panel.orderFront(nil)
+        orbitWindow = panel
+        orbitSwitcherView = overlay
+        refreshClickAwayMonitoring()
+        overlay.configure(
+            items: noteSlots,
+            activeURL: noteURL,
+            anchor: localAnchor,
+            placement: layout.placement,
+            animated: animated
+        )
+    }
+
+    private func switcherLayout(around screenAnchor: NSPoint, usesFullDisplay: Bool = false) -> SwitcherLayout {
+        let screen = NSScreen.screens.first(where: {
+            (usesFullDisplay ? $0.frame : $0.visibleFrame).contains(screenAnchor)
+        }) ?? window?.screen ?? NSScreen.main
+        let availableFrame = usesFullDisplay ? screen?.frame : screen?.visibleFrame
+        let displayFrame = availableFrame ?? NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        let roomAbove = displayFrame.maxY - screenAnchor.y
+        let roomBelow = screenAnchor.y - displayFrame.minY
+        let placement: NoteSwitcherPlacement
+        if roomAbove < 160, roomBelow > roomAbove {
+            placement = .below
+        } else if roomBelow < 160, roomAbove > roomBelow {
+            placement = .above
+        } else {
+            placement = .balanced
+        }
+
+        let size = placement == .balanced ? NSSize(width: 240, height: 246) : NSSize(width: 240, height: 220)
+        let roomRight = displayFrame.maxX - screenAnchor.x
+        let anchorX: CGFloat = roomRight < 210 ? 200 : 40
+        let anchorY: CGFloat
+        switch placement {
+        case .balanced: anchorY = size.height / 2
+        case .above: anchorY = 22
+        case .below: anchorY = size.height - 22
+        }
+        return SwitcherLayout(size: size, anchor: NSPoint(x: anchorX, y: anchorY), placement: placement)
+    }
+
+    private func scheduleOrbitClose() {
+        guard isInitialHovered == false, isOrbitItemHovered == false else { return }
+        orbitHideTimer?.invalidate()
+        orbitHideTimer = Timer.scheduledTimer(withTimeInterval: 0.34, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self,
+                      self.isInitialHovered == false,
+                      self.isOrbitItemHovered == false else { return }
+                self.closeOrbit(animated: true)
+            }
+        }
+    }
+
+    private func closeOrbit(animated: Bool) {
+        guard let overlay = orbitSwitcherView, let panel = orbitWindow else { return }
+        orbitSwitcherView = nil
+        orbitWindow = nil
+        refreshClickAwayMonitoring()
+        let removePanel = { [weak self, weak panel] in
+            guard let panel else { return }
+            self?.window?.removeChildWindow(panel)
+            panel.orderOut(nil)
+        }
+        guard animated else {
+            removePanel()
+            return
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.14
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            overlay.animator().alphaValue = 0
+        }
+        Timer.scheduledTimer(withTimeInterval: 0.16, repeats: false) { [weak self, weak panel] _ in
+            Task { @MainActor in
+                guard let panel else { return }
+                self?.window?.removeChildWindow(panel)
+                panel.orderOut(nil)
+            }
+        }
+    }
+
+    private func stepSwitcher(by direction: Int) {
+        guard noteSlots.count > 1,
+              let currentIndex = noteSlots.firstIndex(where: {
+                  $0.url.standardizedFileURL == noteURL.standardizedFileURL
+              }) else { return }
+        let nextIndex = (currentIndex + direction + noteSlots.count) % noteSlots.count
+        switchToNote(noteSlots[nextIndex])
+        if orbitSwitcherView != nil { showOrbit(animated: true) }
+    }
+
+    private func showSwitcherMenu(relativeTo sender: NSView) {
+        let menu = NSMenu()
+        let assignedPaths = Set(noteSlots.map { $0.url.standardizedFileURL.path })
+        let available = storage.recentNotes(limit: 10_000).filter {
+            assignedPaths.contains($0.url.standardizedFileURL.path) == false
+        }
+
+        let addHeader = NSMenuItem(title: noteSlots.count < 5 ? "Add Note" : "Replace a Slot", action: nil, keyEquivalent: "")
+        addHeader.isEnabled = false
+        menu.addItem(addHeader)
+        if available.isEmpty {
+            let empty = NSMenuItem(title: "No other notes", action: nil, keyEquivalent: "")
+            empty.isEnabled = false
+            menu.addItem(empty)
+        } else {
+            for note in available {
+                let item = NSMenuItem(title: note.title, action: noteSlots.count < 5 ? #selector(addSwitcherNote(_:)) : nil, keyEquivalent: "")
+                item.target = self
+                item.representedObject = note.url
+                if noteSlots.count >= 5 {
+                    let replacements = NSMenu()
+                    for slot in noteSlots where slot.url.standardizedFileURL != noteURL.standardizedFileURL {
+                        let replacement = NSMenuItem(title: "Replace \(slot.title)", action: #selector(replaceSwitcherNote(_:)), keyEquivalent: "")
+                        replacement.target = self
+                        replacement.representedObject = ["new": note.url, "old": slot.url]
+                        replacements.addItem(replacement)
+                    }
+                    item.submenu = replacements
+                }
+                menu.addItem(item)
+            }
+        }
+
+        let removable = noteSlots.filter { $0.url.standardizedFileURL != noteURL.standardizedFileURL }
+        if removable.isEmpty == false {
+            menu.addItem(.separator())
+            let removeHeader = NSMenuItem(title: "Remove from Switcher", action: nil, keyEquivalent: "")
+            removeHeader.isEnabled = false
+            menu.addItem(removeHeader)
+            for slot in removable {
+                let item = NSMenuItem(title: slot.title, action: #selector(removeSwitcherNote(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = slot.url
+                menu.addItem(item)
+            }
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: sender.bounds.midX, y: sender.bounds.minY - 3), in: sender)
+    }
+
+    @objc private func addSwitcherNote(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL, noteSlots.count < 5 else { return }
+        noteSlots.append(NoteSwitcherItem(title: NoteStorage.noteTitle(from: url), url: url))
+        onChange()
+        refreshOpenSwitchers()
+    }
+
+    @objc private func replaceSwitcherNote(_ sender: NSMenuItem) {
+        guard let payload = sender.representedObject as? [String: URL],
+              let newURL = payload["new"], let oldURL = payload["old"],
+              let index = noteSlots.firstIndex(where: { $0.url.standardizedFileURL == oldURL.standardizedFileURL }) else { return }
+        noteSlots[index] = NoteSwitcherItem(title: NoteStorage.noteTitle(from: newURL), url: newURL)
+        onChange()
+        refreshOpenSwitchers()
+    }
+
+    @objc private func removeSwitcherNote(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        noteSlots.removeAll { $0.url.standardizedFileURL == url.standardizedFileURL }
+        onChange()
+        refreshOpenSwitchers()
+    }
+
+    private func refreshOpenSwitchers() {
+        if orbitSwitcherView != nil { showOrbit(animated: false) }
+        updateFloatingView(expanded: isFloatingExpanded, animated: false)
+    }
+
+    private func switchToNote(_ note: NoteSwitcherItem) {
+        guard note.url.standardizedFileURL != noteURL.standardizedFileURL else { return }
+        autosaveTimer?.invalidate()
+        saveNow()
+
+        noteID = UUID().uuidString
+        noteURL = note.url
+        noteTitle = note.title
+        updateTitleButton()
+        window?.title = noteTitle
+        loadContent()
+        onChange()
+        updateFloatingView(expanded: isFloatingExpanded, animated: false)
     }
 
     private func loadContent() {
@@ -297,10 +647,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
         let markdown = storage.loadMarkdown(from: noteURL)
         if noteTitle == "Untitled Note", let firstLine = markdown.components(separatedBy: .newlines).first(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            let oldURL = noteURL
             noteTitle = String(firstLine.trimmingCharacters(in: CharacterSet(charactersIn: "#* -\t")))
+            noteURL = (try? storage.renameNote(at: noteURL, id: noteID, title: noteTitle)) ?? noteURL
+            updateCurrentSlot(from: oldURL)
             updateTitleButton()
             window?.title = noteTitle
-            noteURL = (try? storage.renameNote(at: noteURL, id: noteID, title: noteTitle)) ?? noteURL
         }
         editorView.load(document: EditorDocument(html: Self.html(fromMarkdown: markdown), plainText: markdown))
     }
@@ -338,7 +690,12 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     func windowDidResize(_ notification: Notification) {
+        if orbitSwitcherView != nil { showOrbit(animated: false) }
         editorView.restoreViewportAnchor()
+    }
+
+    func windowDidMove(_ notification: Notification) {
+        if orbitSwitcherView != nil { showOrbit(animated: false) }
     }
 
     func windowDidEndLiveResize(_ notification: Notification) {
@@ -359,6 +716,288 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private func applyPinnedState() {
         window?.level = isPinned ? .floating : .normal
         updatePinButton()
+    }
+
+    private func collapseToFloatingInitial() {
+        guard let window else { return }
+        saveNow()
+        closeOrbit(animated: false)
+        ensureFloatingControl()
+        window.orderOut(nil)
+        updateFloatingView(expanded: false, animated: false)
+        floatingWindow?.orderFront(nil)
+    }
+
+    private func ensureFloatingControl() {
+        if floatingWindow != nil {
+            floatingWindow?.orderFront(nil)
+            updateFloatingView(expanded: isFloatingExpanded, animated: false)
+            return
+        }
+        guard let window else { return }
+        let defaultAnchor = NSPoint(x: window.frame.minX + 38, y: window.frame.maxY - 30)
+        let screenAnchor = visibleFloatingAnchor(floatingAnchorOnScreen ?? defaultAnchor)
+        floatingAnchorOnScreen = screenAnchor
+        let origin = NSPoint(x: screenAnchor.x - 24, y: screenAnchor.y - 24)
+        let panel = NSPanel(
+            contentRect: NSRect(origin: origin, size: NSSize(width: 48, height: 48)),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = false
+        panel.level = .statusBar
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = false
+
+        let view = FloatingSwitcherView(frame: panel.contentView?.bounds ?? NSRect(x: 0, y: 0, width: 48, height: 48))
+        view.autoresizingMask = [.width, .height]
+        view.onActivate = { [weak self] in self?.toggleFromFloatingControl() }
+        view.onHoverChanged = { [weak self] hovered in self?.setFloatingHovered(hovered) }
+        view.onSelect = { [weak self] item in
+            guard let self else { return }
+            self.switchToNote(item)
+            self.restoreFromFloatingInitial()
+        }
+        view.onAdd = { [weak self] sender in self?.showSwitcherMenu(relativeTo: sender) }
+        view.onStep = { [weak self] direction in
+            self?.stepSwitcher(by: direction)
+            self?.updateFloatingView(expanded: true, animated: true)
+        }
+        view.onDragging = { [weak self] point in
+            guard let self else { return }
+            let anchor = self.visibleFloatingAnchor(point)
+            self.floatingAnchorOnScreen = anchor
+            self.updateFloatingView(
+                expanded: self.isFloatingExpanded,
+                animated: false,
+                anchorOnScreen: anchor
+            )
+        }
+        view.onMoved = { [weak self] point in
+            guard let self else { return }
+            let anchor = self.visibleFloatingAnchor(point)
+            self.floatingAnchorOnScreen = anchor
+            self.updateFloatingView(
+                expanded: self.isFloatingExpanded,
+                animated: false,
+                anchorOnScreen: anchor
+            )
+            self.onChange()
+            self.updateFloatingContrast()
+        }
+        panel.contentView = view
+        floatingWindow = panel
+        floatingView = view
+        isFloatingExpanded = false
+        floatingSwitcherAnchor = NSPoint(x: 24, y: 24)
+        floatingPlacement = .balanced
+        updateFloatingView(expanded: false, animated: false)
+        panel.orderFront(nil)
+        DispatchQueue.main.async { [weak self] in self?.updateFloatingContrast() }
+    }
+
+    private func toggleFromFloatingControl() {
+        if window?.isVisible == true {
+            collapseToFloatingInitial()
+        } else {
+            restoreFromFloatingInitial()
+        }
+    }
+
+    private func restoreFromFloatingInitial() {
+        floatingHideTimer?.invalidate()
+        rememberFloatingAnchor()
+        showWindow(nil)
+        window?.makeKeyAndOrderFront(nil)
+        updateFloatingView(expanded: false, animated: false)
+        floatingWindow?.orderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func removeFloatingControl() {
+        floatingHideTimer?.invalidate()
+        rememberFloatingAnchor()
+        floatingWindow?.orderOut(nil)
+        floatingWindow = nil
+        floatingView = nil
+        isFloatingExpanded = false
+        floatingSwitcherAnchor = NSPoint(x: 24, y: 24)
+        floatingPlacement = .balanced
+        refreshClickAwayMonitoring()
+    }
+
+    private func setFloatingHovered(_ hovered: Bool) {
+        if hovered {
+            floatingHideTimer?.invalidate()
+            updateFloatingView(expanded: true, animated: isFloatingExpanded == false)
+        } else {
+            scheduleFloatingCollapse(after: 0.7)
+        }
+    }
+
+    private func scheduleFloatingCollapse(after delay: TimeInterval) {
+        floatingHideTimer?.invalidate()
+        floatingHideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, let panel = self.floatingWindow else { return }
+                let proximityFrame = panel.frame.insetBy(dx: -30, dy: -30)
+                if proximityFrame.contains(NSEvent.mouseLocation) {
+                    self.scheduleFloatingCollapse(after: 0.35)
+                } else {
+                    self.updateFloatingView(expanded: false, animated: true)
+                }
+            }
+        }
+    }
+
+    private func updateFloatingView(expanded: Bool, animated: Bool, anchorOnScreen explicitAnchor: NSPoint? = nil) {
+        guard let panel = floatingWindow, let floatingView else { return }
+        let currentAnchor = NSPoint(
+            x: panel.frame.minX + floatingSwitcherAnchor.x,
+            y: panel.frame.minY + floatingSwitcherAnchor.y
+        )
+        let anchorOnScreen = explicitAnchor ?? currentAnchor
+        if expanded != isFloatingExpanded || expanded || explicitAnchor != nil {
+            let layout = switcherLayout(around: anchorOnScreen, usesFullDisplay: true)
+            let size = expanded ? layout.size : NSSize(width: 48, height: 48)
+            let targetAnchor = expanded ? layout.anchor : NSPoint(x: 24, y: 24)
+            let frame = NSRect(
+                x: anchorOnScreen.x - targetAnchor.x,
+                y: anchorOnScreen.y - targetAnchor.y,
+                width: size.width,
+                height: size.height
+            )
+            panel.setFrame(frame, display: true, animate: false)
+            isFloatingExpanded = expanded
+            floatingSwitcherAnchor = targetAnchor
+            floatingPlacement = expanded ? layout.placement : .balanced
+            floatingAnchorOnScreen = anchorOnScreen
+        }
+        floatingView.configure(
+            activeTitle: noteTitle,
+            activeURL: noteURL,
+            items: noteSlots,
+            expanded: expanded,
+            anchor: floatingSwitcherAnchor,
+            placement: floatingPlacement,
+            showsMinimize: window?.isVisible == true,
+            animated: animated
+        )
+        refreshClickAwayMonitoring()
+    }
+
+    private func refreshClickAwayMonitoring() {
+        let shouldMonitor = orbitWindow != nil || isFloatingExpanded
+        if shouldMonitor {
+            guard localClickAwayMonitor == nil else { return }
+            localClickAwayMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+                Task { @MainActor in self?.dismissSwitchersIfClickAway(at: NSEvent.mouseLocation) }
+                return event
+            }
+            globalClickAwayMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+                Task { @MainActor in self?.dismissSwitchersIfClickAway(at: NSEvent.mouseLocation) }
+            }
+        } else {
+            stopClickAwayMonitoring()
+        }
+    }
+
+    private func stopClickAwayMonitoring() {
+        if let localClickAwayMonitor { NSEvent.removeMonitor(localClickAwayMonitor) }
+        if let globalClickAwayMonitor { NSEvent.removeMonitor(globalClickAwayMonitor) }
+        localClickAwayMonitor = nil
+        globalClickAwayMonitor = nil
+    }
+
+    private func dismissSwitchersIfClickAway(at screenPoint: NSPoint) {
+        if let panel = orbitWindow, let overlay = orbitSwitcherView {
+            let localPoint = NSPoint(x: screenPoint.x - panel.frame.minX, y: screenPoint.y - panel.frame.minY)
+            if overlay.isInteractive(at: localPoint) == false && initialButtonScreenFrame().contains(screenPoint) == false {
+                closeOrbit(animated: true)
+            }
+        }
+        if isFloatingExpanded, let panel = floatingWindow, let floatingView {
+            let localPoint = NSPoint(x: screenPoint.x - panel.frame.minX, y: screenPoint.y - panel.frame.minY)
+            if floatingView.isInteractive(at: localPoint) == false {
+                updateFloatingView(expanded: false, animated: true)
+            }
+        }
+    }
+
+    private func initialButtonScreenFrame() -> NSRect {
+        guard let window else { return .zero }
+        let rectInWindow = initialButton.convert(initialButton.bounds, to: nil)
+        let origin = window.convertPoint(toScreen: rectInWindow.origin)
+        return NSRect(origin: origin, size: rectInWindow.size)
+    }
+
+    private func updateFloatingContrast() {
+        guard let panel = floatingWindow, let floatingView else { return }
+        let anchorOnScreen = NSPoint(
+            x: panel.frame.minX + floatingSwitcherAnchor.x,
+            y: panel.frame.minY + floatingSwitcherAnchor.y
+        )
+        floatingView.applyContrast(over: Self.sampledScreenColor(at: anchorOnScreen, below: panel))
+    }
+
+    private static func sampledScreenColor(at appKitPoint: NSPoint, below panel: NSWindow) -> NSColor? {
+        let primaryTop = NSScreen.screens.first?.frame.maxY ?? 0
+        let sampleRect = CGRect(x: appKitPoint.x - 4, y: primaryTop - appKitPoint.y - 4, width: 9, height: 9)
+        guard let image = CGWindowListCreateImage(
+            sampleRect,
+            .optionOnScreenBelowWindow,
+            CGWindowID(panel.windowNumber),
+            [.bestResolution, .boundsIgnoreFraming]
+        ) else { return nil }
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        guard bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0 else { return nil }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var count: CGFloat = 0
+        for x in 0..<bitmap.pixelsWide {
+            for y in 0..<bitmap.pixelsHigh {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                red += color.redComponent
+                green += color.greenComponent
+                blue += color.blueComponent
+                count += 1
+            }
+        }
+        guard count > 0 else { return nil }
+        return NSColor(srgbRed: red / count, green: green / count, blue: blue / count, alpha: 1)
+    }
+
+    private func rememberFloatingAnchor() {
+        guard let panel = floatingWindow else { return }
+        floatingAnchorOnScreen = NSPoint(
+            x: panel.frame.minX + floatingSwitcherAnchor.x,
+            y: panel.frame.minY + floatingSwitcherAnchor.y
+        )
+        onChange()
+    }
+
+    private func visibleFloatingAnchor(_ point: NSPoint) -> NSPoint {
+        let screen = NSScreen.screens.first(where: { $0.frame.contains(point) })
+            ?? NSScreen.screens.min { lhs, rhs in
+                Self.distanceSquared(from: point, to: lhs.frame) < Self.distanceSquared(from: point, to: rhs.frame)
+            }
+            ?? window?.screen
+            ?? NSScreen.main
+        let displayFrame = screen?.frame ?? NSRect(x: 0, y: 0, width: 1_440, height: 900)
+        return NSPoint(
+            x: min(max(point.x, displayFrame.minX + 20), displayFrame.maxX - 20),
+            y: min(max(point.y, displayFrame.minY + 20), displayFrame.maxY - 20)
+        )
+    }
+
+    private static func distanceSquared(from point: NSPoint, to rect: NSRect) -> CGFloat {
+        let nearestX = min(max(point.x, rect.minX), rect.maxX)
+        let nearestY = min(max(point.y, rect.minY), rect.maxY)
+        return pow(point.x - nearestX, 2) + pow(point.y - nearestY, 2)
     }
 
     private func updatePinButton() {
@@ -417,8 +1056,18 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     private func updateTitleButton() {
         titleLabel.stringValue = noteTitle
-        titleButton.toolTip = "Rename \(noteTitle)"
+        initialButton.title = noteTitle.trimmingCharacters(in: .whitespacesAndNewlines).first.map { String($0).uppercased() } ?? "•"
+        initialButton.toolTip = nil
+        titleButton.toolTip = nil
         titleField.stringValue = noteTitle
+    }
+
+    private func updateCurrentSlot(from oldURL: URL) {
+        if let index = noteSlots.firstIndex(where: { $0.url.standardizedFileURL == oldURL.standardizedFileURL }) {
+            noteSlots[index] = NoteSwitcherItem(title: noteTitle, url: noteURL)
+        } else if noteSlots.count < 5 {
+            noteSlots.append(NoteSwitcherItem(title: noteTitle, url: noteURL))
+        }
     }
 
     private func export(content: String, fileExtension: String) {
@@ -507,7 +1156,7 @@ extension NoteWindowController: NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sizePreset, .pin, .flexibleSpace, .noteTitle, .voiceTranscription, .flexibleSpace, .export]
+        [.sizePreset, .pin, .noteTitle, .flexibleSpace, .voiceTranscription, .export]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
@@ -594,7 +1243,6 @@ extension NoteWindowController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: id)
         item.label = "Note Title"
         item.paletteLabel = "Note Title"
-        item.toolTip = "Rename \(noteTitle)"
         item.visibilityPriority = .high
 
         configureTitleControls()
@@ -605,8 +1253,15 @@ extension NoteWindowController: NSToolbarDelegate {
         container.wantsLayer = true
         container.layer?.cornerRadius = 11
         container.layer?.masksToBounds = true
+        container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleSwitcherView = container
+        initialButton.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleButton.translatesAutoresizingMaskIntoConstraints = false
+        if initialButton.superview !== container {
+            initialButton.removeFromSuperview()
+            container.addSubview(initialButton)
+        }
         if titleLabel.superview !== container {
             titleLabel.removeFromSuperview()
             container.addSubview(titleLabel)
@@ -616,10 +1271,13 @@ extension NoteWindowController: NSToolbarDelegate {
             container.addSubview(titleButton)
         }
         NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 120),
-            container.widthAnchor.constraint(lessThanOrEqualToConstant: 240),
+            container.widthAnchor.constraint(equalToConstant: 190),
             container.heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            initialButton.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 3),
+            initialButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            initialButton.widthAnchor.constraint(equalToConstant: 20),
+            initialButton.heightAnchor.constraint(equalToConstant: 20),
+            titleLabel.leadingAnchor.constraint(equalTo: initialButton.trailingAnchor, constant: 6),
             titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             titleButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
             titleButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
