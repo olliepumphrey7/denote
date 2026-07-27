@@ -3,17 +3,32 @@ import DenoteCore
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let storage = NoteStorage()
+    private let storage: NoteStorage = {
+        if let overridePath = ProcessInfo.processInfo.environment["DENOTE_NOTES_DIRECTORY"],
+           overridePath.isEmpty == false {
+            let notesURL = URL(fileURLWithPath: overridePath)
+            let supportURL = notesURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("\(notesURL.lastPathComponent)-support")
+            return NoteStorage(
+                notesDirectory: notesURL,
+                appSupportDirectory: supportURL
+            )
+        }
+        return NoteStorage()
+    }()
     private let hotKeyManager = GlobalHotKeyManager()
     private var noteController: NoteWindowController?
-    private var menuBarController: MenuBarController?
+    private var notchControllers: [NotchController] = []
     private var settingsController: ShortcutSettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = makeMainMenu()
         try? storage.prepare()
 
-        let savedState = storage.readState()
+        let savedState = ProcessInfo.processInfo.environment["DENOTE_NOTES_DIRECTORY"] == nil
+            ? storage.readState()
+            : AppState()
         let initialState = restoredState(from: savedState) ?? newNoteState(
             preservingWindowStateFrom: savedState.notes.last
         )
@@ -22,41 +37,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             noteState: initialState,
             onChange: { [weak self] in
                 self?.saveState()
-                self?.menuBarController?.refreshIfVisible()
+                self?.refreshNotches()
             }
         )
         noteController = controller
-
-        menuBarController = MenuBarController(
-            storage: storage,
-            activeNoteURL: { [weak controller] in
-                controller?.currentNoteURL ?? initialStateURLFallback()
-            },
-            shortcutTitle: { [weak self] in
-                guard let self else { return KeyboardShortcut.defaultShortcut.displayName }
-                let suffix = self.hotKeyManager.isRegistered ? "" : " (unavailable)"
-                return self.hotKeyManager.shortcut.displayName + suffix
-            },
-            onToggleWindow: { [weak controller] in
-                controller?.toggleVisibility()
-            },
-            onNewNote: { [weak self] in
-                self?.newNote(nil)
-            },
-            onOpenNote: { [weak self] url in
-                self?.openNote(at: url)
-            },
-            onOpenSettings: { [weak self] in
-                self?.showSettings(nil)
-            }
+        rebuildNotchControllers()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(screenParametersChanged(_:)),
+            name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
         )
 
-        hotKeyManager.onPressed = { [weak controller, weak menuBarController] in
-            menuBarController?.closePopover()
+        hotKeyManager.onPressed = { [weak self, weak controller] in
+            self?.closeNotchTrays()
             controller?.toggleVisibility()
+            self?.refreshNotches()
         }
 
-        controller.showAndActivate()
         saveState()
     }
 
@@ -67,6 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         noteController?.saveCurrentNote()
         saveState()
+        notchControllers.forEach { $0.invalidate() }
+        NotificationCenter.default.removeObserver(self)
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
@@ -80,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func newNote(_ sender: Any?) {
         noteController?.createNewNote()
         saveState()
-        menuBarController?.refreshIfVisible()
+        closeNotchTrays()
+        refreshNotches()
     }
 
     @objc func showSettings(_ sender: Any?) {
@@ -88,11 +89,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             settingsController = ShortcutSettingsWindowController(hotKeyManager: hotKeyManager)
         }
         settingsController?.showSettings()
-        menuBarController?.refreshIfVisible()
+        refreshNotches()
     }
 
     @objc func toggleNoteWindow(_ sender: Any?) {
         noteController?.toggleVisibility()
+        closeNotchTrays()
+        refreshNotches()
     }
 
     @objc func exportMarkdown(_ sender: Any?) {
@@ -120,8 +123,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         noteController?.displayNote(at: url)
         saveState()
-        menuBarController?.refreshIfVisible()
+        closeNotchTrays()
+        refreshNotches()
         return true
+    }
+
+    @objc private func screenParametersChanged(_ notification: Notification) {
+        rebuildNotchControllers()
+    }
+
+    private func rebuildNotchControllers() {
+        notchControllers.forEach { $0.invalidate() }
+        notchControllers = NSScreen.screens.map { screen in
+            NotchController(
+                screen: screen,
+                storage: storage,
+                activeNoteURL: { [weak self] in
+                    self?.noteController?.currentNoteURL ?? initialStateURLFallback()
+                },
+                activeNoteTitle: { [weak self] in
+                    self?.noteController?.currentNoteTitle ?? "Untitled Note"
+                },
+                noteWindowIsVisible: { [weak self] in
+                    self?.noteController?.isNoteWindowVisible ?? false
+                },
+                shortcutTitle: { [weak self] in
+                    guard let self else {
+                        return KeyboardShortcut.defaultShortcut.displayName
+                    }
+                    let suffix = self.hotKeyManager.isRegistered ? "" : " (unavailable)"
+                    return self.hotKeyManager.shortcut.displayName + suffix
+                },
+                onToggleWindow: { [weak self] in
+                    self?.closeNotchTrays()
+                    self?.noteController?.toggleVisibility()
+                    self?.refreshNotches()
+                },
+                onHideWindow: { [weak self] in
+                    self?.closeNotchTrays()
+                    self?.noteController?.hideWindow()
+                    self?.refreshNotches()
+                },
+                onNewNote: { [weak self] in
+                    self?.newNote(nil)
+                },
+                onOpenNote: { [weak self] url in
+                    self?.openNote(at: url)
+                },
+                onOpenSettings: { [weak self] in
+                    self?.showSettings(nil)
+                }
+            )
+        }
+    }
+
+    private func refreshNotches() {
+        notchControllers.forEach { $0.refresh() }
+    }
+
+    private func closeNotchTrays() {
+        notchControllers.forEach { $0.closeTray() }
     }
 
     private func restoredState(from appState: AppState) -> NoteState? {

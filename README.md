@@ -16,12 +16,17 @@ App window state is saved in:
 
 ## Features
 
-### Open from anywhere
+### Work from the notch
 
-- Right-click the wide Denote menu-bar item to see the five most recently edited notes, with older notes in a native More Notes submenu.
-- Create a new note from the top of the native menu.
-- Left-click the menu-bar item or press `Option-Space` to show or hide the note window.
-- Use the note-title chevron in the window toolbar to create, rename, or switch notes without opening the menu-bar menu.
+- Denote places a compact black island at the top of every connected display.
+- Hover over the central notch body to reveal a horizontally scrollable tray of recent-note cards; the side buttons remain independent.
+- Click any card to open it in the note window; the tray closes automatically.
+- When the current note is open, its card becomes a large minimise control that returns the window to the notch.
+- Click the current-note icon on the left side of the notch to show or hide it.
+- Click the new-note icon on the right side to create and open a note.
+- Right-click the island for Settings, the configured shortcut, and Quit.
+- Press `Option-Space` to show or hide the current note from anywhere.
+- Double-click the note title in the window toolbar to rename it.
 - Change the global shortcut from Denote Settings.
 - Work with one note window at a time; selecting or creating a note swaps the document in that window.
 
@@ -30,12 +35,13 @@ App window state is saved in:
 - Pin the note window above other windows with the always-hover toggle.
 - Toggle the window between standard and small modes.
 - Restore the active note and window position when Denote relaunches.
+- Use the same notch interaction on notchless and external displays through a narrower synthetic top-centre island.
 
 ### Capture quickly
 
 - Dictate notes with high-quality local voice transcription.
 - Autosave every open note as you work.
-- Use random readable note names and rename from the titlebar chevron.
+- Use random readable note names and double-click the title to rename.
 
 ### Edit without fighting paste
 

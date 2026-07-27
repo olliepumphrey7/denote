@@ -3,6 +3,8 @@ import DenoteCore
 
 @MainActor
 final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
+    private static let minimumWindowSize = NSSize(width: 260, height: 260)
+
     enum SizePreset: String {
         case standard
         case small
@@ -13,8 +15,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
         var size: NSSize {
             switch self {
-            case .standard: NSSize(width: 660, height: 600)
-            case .small: NSSize(width: 420, height: 220)
+            case .standard: NSSize(width: 660, height: 560)
+            case .small: NSSize(width: 440, height: 260)
             }
         }
 
@@ -47,11 +49,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private let editorView = BlockEditorView()
     private let voiceTranscriber = VoiceTranscriber()
     private let titleLabel = DraggableTitleLabel()
-    private let titleButton = NSButton()
+    private let titleMicrophoneButton = NSButton()
     private let titleField = NSTextField()
     private weak var sizeButton: NSButton?
     private weak var pinButton: NSButton?
-    private weak var micButton: NSButton?
     private var titlePopover: NSPopover?
     private var noteTitle: String
     private var preset: SizePreset
@@ -84,13 +85,21 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             backing: .buffered,
             defer: false
         )
-        window.minSize = NSSize(width: 320, height: SizePreset.small.size.height)
+        window.minSize = Self.minimumWindowSize
         window.title = noteTitle
         window.titleVisibility = .hidden
         window.toolbarStyle = .unifiedCompact
         window.titlebarSeparatorStyle = .none
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: .aqua)
+        window.backgroundColor = DenoteWindowPalette.background
+        window.isOpaque = false
+        window.hasShadow = true
         super.init(window: window)
         window.delegate = self
+        [.closeButton, .miniaturizeButton, .zoomButton].forEach {
+            window.standardWindowButton($0)?.isHidden = true
+        }
         window.onMiniaturize = { [weak self] in
             self?.hideWindow()
             return true
@@ -117,6 +126,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         noteTitle
     }
 
+    var isNoteWindowVisible: Bool {
+        window?.isVisible == true
+    }
+
     func currentState() -> NoteState? {
         guard let window else { return nil }
         return NoteState(
@@ -138,6 +151,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     @objc func toggleSizePreset(_ sender: Any?) {
         setPreset(preset.next)
+    }
+
+    @objc func minimiseToNotch(_ sender: Any?) {
+        hideWindow()
     }
 
     @objc func togglePinned(_ sender: Any?) {
@@ -194,98 +211,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         titlePopover?.close()
     }
 
-    @objc private func showNoteSwitcherMenu(_ sender: NSButton) {
-        let menu = NSMenu()
-        menu.autoenablesItems = false
-
-        let newNote = NSMenuItem(
-            title: "New Note",
-            action: #selector(createNewNoteFromMenu(_:)),
-            keyEquivalent: "n"
-        )
-        newNote.keyEquivalentModifierMask = [.command]
-        configureMenuItem(newNote)
-        menu.addItem(newNote)
-        menu.addItem(.separator())
-
-        let activeURL = noteURL.standardizedFileURL
-        let notes = storage.recentNotes(limit: 10_000)
-        if notes.isEmpty {
-            let empty = NSMenuItem(title: "No Saved Notes", action: nil, keyEquivalent: "")
-            empty.isEnabled = false
-            menu.addItem(empty)
-        } else {
-            addNoteItems(Array(notes.prefix(5)), to: menu, activeURL: activeURL)
-
-            let remainingNotes = Array(notes.dropFirst(5))
-            if remainingNotes.isEmpty == false {
-                let moreMenu = NSMenu(title: "More Notes")
-                moreMenu.autoenablesItems = false
-                addNoteItems(remainingNotes, to: moreMenu, activeURL: activeURL)
-
-                let moreNotes = NSMenuItem(
-                    title: "More Notes (\(remainingNotes.count))",
-                    action: nil,
-                    keyEquivalent: ""
-                )
-                moreNotes.submenu = moreMenu
-                moreNotes.isEnabled = true
-                menu.addItem(moreNotes)
-            }
-        }
-
-        menu.addItem(.separator())
-        let rename = NSMenuItem(
-            title: "Rename Current Note…",
-            action: #selector(renameCurrentNoteFromMenu(_:)),
-            keyEquivalent: ""
-        )
-        configureMenuItem(rename)
-        menu.addItem(rename)
-        menu.popUp(
-            positioning: nil,
-            at: NSPoint(x: sender.bounds.maxX, y: sender.bounds.minY - 2),
-            in: sender
-        )
-    }
-
-    private func addNoteItems(
-        _ notes: [NoteStorage.RecentNote],
-        to menu: NSMenu,
-        activeURL: URL
-    ) {
-        for note in notes {
-            let item = NSMenuItem(
-                title: note.title,
-                action: #selector(switchNoteFromMenu(_:)),
-                keyEquivalent: ""
-            )
-            item.representedObject = note.url
-            item.state = note.url.standardizedFileURL == activeURL ? .on : .off
-            configureMenuItem(item)
-            menu.addItem(item)
-        }
-    }
-
-    private func configureMenuItem(_ item: NSMenuItem) {
-        item.target = self
-        item.isEnabled = true
-    }
-
-    @objc private func createNewNoteFromMenu(_ sender: NSMenuItem) {
-        createNewNote()
-    }
-
-    @objc private func switchNoteFromMenu(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        displayNote(at: url)
-    }
-
-    @objc private func renameCurrentNoteFromMenu(_ sender: NSMenuItem) {
-        showTitlePopover(relativeTo: titleButton)
-    }
-
-    private func showTitlePopover(relativeTo sender: NSButton) {
+    private func showTitlePopover(relativeTo sender: NSView) {
         let popover = NSPopover()
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 360, height: 78)
@@ -356,6 +282,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         container.orientation = .vertical
         container.spacing = 0
         container.distribution = .fill
+        container.wantsLayer = true
+        container.layer?.backgroundColor = DenoteWindowPalette.background.cgColor
 
         editorView.translatesAutoresizingMaskIntoConstraints = false
         editorView.onDocumentChanged = { [weak self] in self?.scheduleAutosave() }
@@ -380,27 +308,31 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.sizeMode = .small
+        toolbar.allowsUserCustomization = false
         window?.toolbar = toolbar
     }
 
     private func configureTitleControls() {
-        titleLabel.font = NSFont.systemFont(ofSize: 12, weight: .medium)
-        titleLabel.textColor = .secondaryLabelColor
+        titleLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        titleLabel.textColor = DenoteWindowPalette.primaryText
         titleLabel.alignment = .center
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.toolTip = "Double-click to rename"
+        titleLabel.setAccessibilityHelp("Double-click to rename this note")
+        titleLabel.onDoubleClick = { [weak self] in
+            guard let self else { return }
+            self.showTitlePopover(relativeTo: self.titleLabel)
+        }
 
-        titleButton.isBordered = false
-        titleButton.bezelStyle = .inline
-        titleButton.image = NSImage(systemSymbolName: "chevron.down", accessibilityDescription: nil)
-        titleButton.imagePosition = .imageOnly
-        titleButton.contentTintColor = .secondaryLabelColor
-        titleButton.controlSize = .small
-        titleButton.target = self
-        titleButton.action = #selector(showNoteSwitcherMenu(_:))
-        titleButton.toolTip = "Switch notes or rename the current note"
-        titleButton.setAccessibilityLabel("Switch Notes")
-        titleButton.setAccessibilityHelp("Choose another note, create a new note, or rename this note")
+        titleMicrophoneButton.isBordered = false
+        titleMicrophoneButton.bezelStyle = .inline
+        titleMicrophoneButton.imagePosition = .imageOnly
+        titleMicrophoneButton.controlSize = .small
+        titleMicrophoneButton.target = self
+        titleMicrophoneButton.action = #selector(toggleVoiceTranscription(_:))
+        titleMicrophoneButton.setAccessibilityLabel("Voice Transcription")
+        updateMicButton()
         updateTitleButton()
     }
 
@@ -558,7 +490,6 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     }
 
     private func updateMicButton(for state: VoiceTranscriber.State = .idle) {
-        guard let micButton else { return }
         let label: String
         let symbol: String
         let tint: NSColor
@@ -587,10 +518,13 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             isEnabled = true
         }
 
-        micButton.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
-        micButton.contentTintColor = tint
-        micButton.toolTip = label
-        micButton.isEnabled = isEnabled
+        titleMicrophoneButton.image = NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: label
+        )
+        titleMicrophoneButton.contentTintColor = tint
+        titleMicrophoneButton.toolTip = label
+        titleMicrophoneButton.isEnabled = isEnabled
     }
 
     private func updateTitleButton() {
@@ -660,8 +594,14 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         }
 
         var adjusted = rect
-        adjusted.size.width = max(min(adjusted.width, visibleFrame.width), fallbackSize.width)
-        adjusted.size.height = max(min(adjusted.height, visibleFrame.height), fallbackSize.height)
+        adjusted.size.width = max(
+            min(adjusted.width, visibleFrame.width),
+            minimumWindowSize.width
+        )
+        adjusted.size.height = max(
+            min(adjusted.height, visibleFrame.height),
+            minimumWindowSize.height
+        )
         if adjusted.maxX < visibleFrame.minX + 80 { adjusted.origin.x = visibleFrame.minX + 40 }
         if adjusted.minX > visibleFrame.maxX - 80 { adjusted.origin.x = visibleFrame.maxX - adjusted.width - 40 }
         if adjusted.maxY < visibleFrame.minY + 80 { adjusted.origin.y = visibleFrame.minY + 40 }
@@ -680,21 +620,36 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
 extension NoteWindowController: NSToolbarDelegate {
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sizePreset, .noteTitle, .voiceTranscription, .pin, .export, .flexibleSpace]
+        [
+            .minimiseToNotch,
+            .sizePreset,
+            .noteTitle,
+            .pin,
+            .export,
+            .flexibleSpace
+        ]
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.sizePreset, .pin, .noteTitle, .flexibleSpace, .voiceTranscription, .export]
+        [
+            .minimiseToNotch,
+            .sizePreset,
+            .flexibleSpace,
+            .noteTitle,
+            .flexibleSpace,
+            .pin,
+            .export
+        ]
     }
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier, willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
         switch itemIdentifier {
+        case .minimiseToNotch:
+            return minimiseToNotchItem(id: itemIdentifier)
         case .sizePreset:
             return sizePresetItem(id: itemIdentifier)
         case .noteTitle:
             return titleItem(id: itemIdentifier)
-        case .voiceTranscription:
-            return voiceTranscriptionItem(id: itemIdentifier)
         case .pin:
             return pinItem(id: itemIdentifier)
         case .export:
@@ -704,6 +659,27 @@ extension NoteWindowController: NSToolbarDelegate {
         }
     }
 
+    private func minimiseToNotchItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: id)
+        item.label = "Minimise to Notch"
+        item.paletteLabel = "Minimise to Notch"
+        item.toolTip = "Minimise to Notch"
+        item.visibilityPriority = .high
+
+        let image = NSImage(
+            systemSymbolName: "minus",
+            accessibilityDescription: "Minimise to Notch"
+        ) ?? NSImage()
+        let button = NSButton(
+            image: image,
+            target: self,
+            action: #selector(minimiseToNotch(_:))
+        )
+        styleToolbarButton(button)
+        item.view = button
+        return item
+    }
+
     private func sizePresetItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: id)
         item.label = "Size"
@@ -711,15 +687,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.visibilityPriority = .high
 
         let button = NSButton(image: NSImage(), target: self, action: #selector(toggleSizePreset(_:)))
-        button.bezelStyle = .texturedRounded
-        button.controlSize = .small
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleProportionallyDown
-        button.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 24)
-        ])
+        styleToolbarButton(button)
 
         sizeButton = button
         updateSizeButton()
@@ -732,36 +700,14 @@ extension NoteWindowController: NSToolbarDelegate {
         let item = NSToolbarItem(itemIdentifier: id)
         item.label = "Always Hover"
         item.paletteLabel = "Always Hover"
-        item.visibilityPriority = .high
+        item.visibilityPriority = .standard
 
         let button = NSButton(image: NSImage(), target: self, action: #selector(togglePinned(_:)))
         button.setButtonType(.toggle)
-        button.bezelStyle = .texturedRounded
-        button.controlSize = .small
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleProportionallyDown
+        styleToolbarButton(button)
 
         pinButton = button
         updatePinButton()
-        item.toolTip = button.toolTip
-        item.view = button
-        return item
-    }
-
-    private func voiceTranscriptionItem(id: NSToolbarItem.Identifier) -> NSToolbarItem {
-        let item = NSToolbarItem(itemIdentifier: id)
-        item.label = "Transcribe"
-        item.paletteLabel = "Transcribe"
-        item.visibilityPriority = .high
-
-        let button = NSButton(image: NSImage(), target: self, action: #selector(toggleVoiceTranscription(_:)))
-        button.bezelStyle = .texturedRounded
-        button.controlSize = .small
-        button.imagePosition = .imageOnly
-        button.imageScaling = .scaleProportionallyDown
-
-        micButton = button
-        updateMicButton()
         item.toolTip = button.toolTip
         item.view = button
         return item
@@ -774,34 +720,32 @@ extension NoteWindowController: NSToolbarDelegate {
         item.visibilityPriority = .high
 
         configureTitleControls()
-        let container = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: 210, height: 22))
-        container.material = .headerView
-        container.blendingMode = .withinWindow
-        container.state = .active
-        container.wantsLayer = true
-        container.layer?.cornerRadius = 11
-        container.layer?.masksToBounds = true
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 150, height: 24))
         container.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleButton.translatesAutoresizingMaskIntoConstraints = false
+        titleMicrophoneButton.translatesAutoresizingMaskIntoConstraints = false
         if titleLabel.superview !== container {
             titleLabel.removeFromSuperview()
             container.addSubview(titleLabel)
         }
-        if titleButton.superview !== container {
-            titleButton.removeFromSuperview()
-            container.addSubview(titleButton)
+        if titleMicrophoneButton.superview !== container {
+            titleMicrophoneButton.removeFromSuperview()
+            container.addSubview(titleMicrophoneButton)
         }
+        let preferredWidth = container.widthAnchor.constraint(equalToConstant: 150)
+        preferredWidth.priority = .defaultHigh
         NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(equalToConstant: 190),
-            container.heightAnchor.constraint(equalToConstant: 22),
-            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            preferredWidth,
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 76),
+            container.widthAnchor.constraint(lessThanOrEqualToConstant: 150),
+            container.heightAnchor.constraint(equalToConstant: 24),
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
             titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            titleButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
-            titleButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            titleButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            titleButton.widthAnchor.constraint(equalToConstant: 20),
-            titleButton.heightAnchor.constraint(equalToConstant: 20)
+            titleMicrophoneButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
+            titleMicrophoneButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            titleMicrophoneButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            titleMicrophoneButton.widthAnchor.constraint(equalToConstant: 20),
+            titleMicrophoneButton.heightAnchor.constraint(equalToConstant: 20)
         ])
 
         item.view = container
@@ -815,23 +759,55 @@ extension NoteWindowController: NSToolbarDelegate {
         item.toolTip = "Export"
 
         let button = NSButton(image: NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export") ?? NSImage(), target: self, action: #selector(showExportMenu(_:)))
-        button.bezelStyle = .texturedRounded
+        styleToolbarButton(button)
+
+        item.view = button
+        item.visibilityPriority = .low
+        return item
+    }
+
+    private func styleToolbarButton(_ button: NSButton) {
+        button.isBordered = false
+        button.bezelStyle = .inline
         button.imagePosition = .imageOnly
         button.controlSize = .small
         button.imageScaling = .scaleProportionallyDown
-
-        item.view = button
-        item.visibilityPriority = .standard
-        return item
+        button.contentTintColor = DenoteWindowPalette.secondaryText
+        button.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            button.widthAnchor.constraint(equalToConstant: 30),
+            button.heightAnchor.constraint(equalToConstant: 26)
+        ])
     }
 }
 
 private extension NSToolbarItem.Identifier {
+    static let minimiseToNotch = NSToolbarItem.Identifier("minimiseToNotch")
     static let sizePreset = NSToolbarItem.Identifier("sizePreset")
     static let noteTitle = NSToolbarItem.Identifier("noteTitle")
-    static let voiceTranscription = NSToolbarItem.Identifier("voiceTranscription")
     static let pin = NSToolbarItem.Identifier("pin")
     static let export = NSToolbarItem.Identifier("export")
+}
+
+private enum DenoteWindowPalette {
+    static let background = NSColor(
+        calibratedRed: 0.975,
+        green: 0.975,
+        blue: 0.98,
+        alpha: 1
+    )
+    static let primaryText = NSColor(
+        calibratedRed: 0.12,
+        green: 0.12,
+        blue: 0.14,
+        alpha: 1
+    )
+    static let secondaryText = NSColor(
+        calibratedRed: 0.38,
+        green: 0.38,
+        blue: 0.42,
+        alpha: 1
+    )
 }
 
 @MainActor
@@ -845,6 +821,8 @@ private final class NoteWindow: NSWindow {
 }
 
 private final class DraggableTitleLabel: NSTextField {
+    var onDoubleClick: (() -> Void)?
+
     init() {
         super.init(frame: .zero)
         isEditable = false
@@ -859,6 +837,11 @@ private final class DraggableTitleLabel: NSTextField {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount >= 2 {
+            onDoubleClick?()
+            return
+        }
         window?.performDrag(with: event)
     }
+
 }

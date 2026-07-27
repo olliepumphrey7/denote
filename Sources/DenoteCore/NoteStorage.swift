@@ -145,6 +145,20 @@ public final class NoteStorage: @unchecked Sendable {
     public struct RecentNote: Equatable, Sendable {
         public let title: String
         public let url: URL
+        public let preview: String
+        public let modifiedAt: Date
+
+        public init(
+            title: String,
+            url: URL,
+            preview: String = "",
+            modifiedAt: Date = .distantPast
+        ) {
+            self.title = title
+            self.url = url
+            self.preview = preview
+            self.modifiedAt = modifiedAt
+        }
     }
 
     public let notesDirectory: URL
@@ -212,7 +226,21 @@ public final class NoteStorage: @unchecked Sendable {
                       document.isBlank == false else {
                     return nil
                 }
-                return (RecentNote(title: Self.noteTitle(from: url), url: url), modified)
+                let preview = document.plainText
+                    .components(separatedBy: .newlines)
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { $0.isEmpty == false }
+                    .prefix(3)
+                    .joined(separator: " ")
+                return (
+                    RecentNote(
+                        title: Self.noteTitle(from: url),
+                        url: url,
+                        preview: String(preview.prefix(160)),
+                        modifiedAt: modified
+                    ),
+                    modified
+                )
             }
             .sorted { $0.1 > $1.1 }
             .prefix(limit)

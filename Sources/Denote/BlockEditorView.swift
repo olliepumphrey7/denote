@@ -83,7 +83,12 @@ final class BlockEditorView: NSView {
 
     private func setupWebView() {
         wantsLayer = true
-        layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        layer?.backgroundColor = NSColor(
+            calibratedRed: 0.975,
+            green: 0.975,
+            blue: 0.98,
+            alpha: 1
+        ).cgColor
         webView.translatesAutoresizingMaskIntoConstraints = false
         webView.navigationDelegate = self
         webView.setValue(false, forKey: "drawsBackground")
@@ -132,20 +137,21 @@ final class BlockEditorView: NSView {
       <meta charset="utf-8">
       <style>
         :root {
-          color-scheme: light dark;
+          color-scheme: light;
           font: -apple-system-body;
-          background: Canvas;
-          color: CanvasText;
+          background: #f9f9fa;
+          color: #1f2023;
         }
 
         html, body {
           margin: 0;
           min-height: 100%;
-          background: Canvas;
+          background: #f9f9fa;
         }
 
         body {
-          font: 14px/1.48 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+          font: 15px/1.58 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+          -webkit-font-smoothing: antialiased;
         }
 
         #editor {
@@ -155,19 +161,28 @@ final class BlockEditorView: NSView {
         .ProseMirror {
           box-sizing: border-box;
           min-height: 100vh;
-          padding: 10px 14px 36px;
+          padding: 0 22px 52px;
           outline: none;
           white-space: normal;
           overflow-wrap: break-word;
+          caret-color: #111216;
+        }
+
+        ::selection {
+          background: rgba(42, 108, 230, 0.22);
         }
 
         .ProseMirror p.is-editor-empty:first-child::before {
           content: "Start writing...";
-          color: GrayText;
+          color: #96969d;
         }
 
         p, ul, ol, table, blockquote {
-          margin: 0 0 9px;
+          margin: 0 0 12px;
+        }
+
+        .ProseMirror > :first-child {
+          margin-top: 0;
         }
 
         ul, ol {
@@ -175,18 +190,19 @@ final class BlockEditorView: NSView {
         }
 
         li {
-          margin: 2px 0;
+          margin: 3px 0;
         }
 
         h1, h2, h3 {
           font-weight: 650;
-          line-height: 1.22;
-          margin: 18px 0 8px;
+          letter-spacing: -0.012em;
+          line-height: 1.18;
+          margin: 24px 0 10px;
         }
 
-        h1 { font-size: 24px; }
-        h2 { font-size: 19px; }
-        h3 { font-size: 16px; }
+        h1 { font-size: 29px; letter-spacing: -0.025em; }
+        h2 { font-size: 22px; }
+        h3 { font-size: 18px; }
 
         table {
           border-collapse: collapse;
@@ -196,21 +212,21 @@ final class BlockEditorView: NSView {
         }
 
         td, th {
-          border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-          padding: 5px 8px;
+          border: 1px solid rgba(20, 20, 24, 0.14);
+          padding: 7px 10px;
           min-width: 56px;
           vertical-align: top;
         }
 
         th {
           font-weight: 650;
-          background: color-mix(in srgb, CanvasText 7%, transparent);
+          background: rgba(20, 20, 24, 0.045);
         }
 
         blockquote {
-          border-left: 3px solid color-mix(in srgb, CanvasText 28%, transparent);
-          padding-left: 10px;
-          color: color-mix(in srgb, CanvasText 76%, transparent);
+          border-left: 3px solid rgba(20, 20, 24, 0.18);
+          padding-left: 12px;
+          color: #62636a;
         }
 
         .ProseMirror .tableWrapper {
@@ -219,8 +235,8 @@ final class BlockEditorView: NSView {
         }
 
         .ProseMirror .selectedCell:after {
-          background: color-mix(in srgb, Highlight 12%, transparent);
-          border: 1px solid color-mix(in srgb, Highlight 38%, transparent);
+          background: rgba(42, 108, 230, 0.10);
+          border: 1px solid rgba(42, 108, 230, 0.42);
           box-sizing: border-box;
         }
 
