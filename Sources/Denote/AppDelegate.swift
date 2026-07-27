@@ -4,63 +4,60 @@ import DenoteCore
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let storage = NoteStorage()
-    private var controllers: [NoteWindowController] = []
-    private var showsHoverIcons = true
+    private let hotKeyManager = GlobalHotKeyManager()
+    private var noteController: NoteWindowController?
+    private var menuBarController: MenuBarController?
+    private var settingsController: ShortcutSettingsWindowController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.mainMenu = makeMainMenu()
         try? storage.prepare()
 
         let savedState = storage.readState()
-        showsHoverIcons = savedState.showsHoverIcons
-        let restored = savedState.notes
-            .compactMap { state -> NoteState? in
-                var state = state
-                let existingURL = storage.existingURL(for: state) ?? state.switcherPaths
-                    .map { URL(fileURLWithPath: $0) }
-                    .first(where: { FileManager.default.fileExists(atPath: $0.path) })
-                guard let existingURL else { return nil }
-                state.path = existingURL.path
-                state.title = NoteStorage.noteTitle(from: existingURL)
-                if state.title == "Untitled Note" {
-                    state.title = storage.randomNoteTitle()
-                }
-                if let renamedURL = try? storage.renameNote(at: URL(fileURLWithPath: state.path), id: state.id, title: state.title) {
-                    state.path = renamedURL.path
-                }
-                return state
+        let initialState = restoredState(from: savedState) ?? newNoteState(
+            preservingWindowStateFrom: savedState.notes.last
+        )
+        let controller = NoteWindowController(
+            storage: storage,
+            noteState: initialState,
+            onChange: { [weak self] in
+                self?.saveState()
+                self?.menuBarController?.refreshIfVisible()
             }
-        if restored.isEmpty {
-            newWindow(nil)
-        } else {
-            restored.forEach { open(noteState: $0) }
+        )
+        noteController = controller
+
+        menuBarController = MenuBarController(
+            storage: storage,
+            activeNoteURL: { [weak controller] in
+                controller?.currentNoteURL ?? initialStateURLFallback()
+            },
+            shortcutTitle: { [weak self] in
+                guard let self else { return KeyboardShortcut.defaultShortcut.displayName }
+                let suffix = self.hotKeyManager.isRegistered ? "" : " (unavailable)"
+                return self.hotKeyManager.shortcut.displayName + suffix
+            },
+            onToggleWindow: { [weak controller] in
+                controller?.toggleVisibility()
+            },
+            onNewNote: { [weak self] in
+                self?.newNote(nil)
+            },
+            onOpenNote: { [weak self] url in
+                self?.openNote(at: url)
+            },
+            onOpenSettings: { [weak self] in
+                self?.showSettings(nil)
+            }
+        )
+
+        hotKeyManager.onPressed = { [weak controller, weak menuBarController] in
+            menuBarController?.closePopover()
+            controller?.toggleVisibility()
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-    }
-
-    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
-        let menu = NSMenu()
-        menu.addItem(NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "New Small Window", action: #selector(newSmallWindow(_:)), keyEquivalent: ""))
-        menu.addItem(.separator())
-        let hoverIcons = NSMenuItem(title: "Show Hover Icons", action: #selector(toggleHoverIcons(_:)), keyEquivalent: "")
-        hoverIcons.target = self
-        hoverIcons.state = showsHoverIcons ? .on : .off
-        menu.addItem(hoverIcons)
-
-        let recentNotes = storage.recentNotes(limit: 3)
-        if recentNotes.isEmpty == false {
-            menu.addItem(.separator())
-            for note in recentNotes {
-                let item = NSMenuItem(title: note.title, action: #selector(openRecentNote(_:)), keyEquivalent: "")
-                item.target = self
-                item.representedObject = note.url
-                menu.addItem(item)
-            }
-        }
-
-        return menu
+        controller.showAndActivate()
+        saveState()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -68,103 +65,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        noteController?.saveCurrentNote()
         saveState()
     }
 
     func application(_ sender: NSApplication, openFile filename: String) -> Bool {
-        openNoteFile(URL(fileURLWithPath: filename))
+        openNote(at: URL(fileURLWithPath: filename))
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
-        urls.forEach { _ = openNoteFile($0) }
+        urls.forEach { _ = openNote(at: $0) }
     }
 
-    @objc func newWindow(_ sender: Any?) {
-        createWindow(preset: .standard)
-    }
-
-    @objc func newSmallWindow(_ sender: Any?) {
-        createWindow(preset: .small)
-    }
-
-    @objc func openRecentNote(_ sender: NSMenuItem) {
-        guard let url = sender.representedObject as? URL else { return }
-        _ = openNoteFile(url)
-    }
-
-    @objc func toggleHoverIcons(_ sender: Any?) {
-        showsHoverIcons.toggle()
-        controllers.forEach { $0.setHoverIconEnabled(showsHoverIcons) }
+    @objc func newNote(_ sender: Any?) {
+        noteController?.createNewNote()
         saveState()
+        menuBarController?.refreshIfVisible()
+    }
+
+    @objc func showSettings(_ sender: Any?) {
+        if settingsController == nil {
+            settingsController = ShortcutSettingsWindowController(hotKeyManager: hotKeyManager)
+        }
+        settingsController?.showSettings()
+        menuBarController?.refreshIfVisible()
+    }
+
+    @objc func toggleNoteWindow(_ sender: Any?) {
+        noteController?.toggleVisibility()
     }
 
     @objc func exportMarkdown(_ sender: Any?) {
-        frontController()?.exportMarkdown(sender)
+        noteController?.exportMarkdown(sender)
     }
 
     @objc func exportText(_ sender: Any?) {
-        frontController()?.exportText(sender)
+        noteController?.exportText(sender)
     }
 
     @objc func exportHTML(_ sender: Any?) {
-        frontController()?.exportHTML(sender)
+        noteController?.exportHTML(sender)
     }
 
     @objc func pasteWithoutFormatting(_ sender: Any?) {
-        frontController()?.pasteWithoutFormatting(sender)
+        noteController?.pasteWithoutFormatting(sender)
     }
 
-    private func createWindow(preset: NoteWindowController.SizePreset) {
-        let id = UUID().uuidString
-        let title = storage.randomNoteTitle()
-        let url = storage.createNoteURL(id: id, title: title)
-        let state = NoteState(id: id, path: url.path, title: title, preset: preset.rawValue)
-        open(noteState: state)
-        saveState()
-    }
-
-    private func open(noteState: NoteState) {
-        let controller = NoteWindowController(storage: storage, noteState: noteState, showsHoverIcon: showsHoverIcons) { [weak self] controller in
-            self?.controllers.removeAll { $0 === controller }
-            self?.saveState()
-        } onChange: { [weak self] in
-            self?.saveState()
-        }
-        controllers.append(controller)
-        controller.showWindow(nil)
-    }
-
-    private func openNoteFile(_ url: URL) -> Bool {
+    @discardableResult
+    private func openNote(at url: URL) -> Bool {
         guard url.pathExtension.lowercased() == "json",
               storage.loadDocument(from: url) != nil else {
             return false
         }
 
-        if let existing = controllers.first(where: { $0.currentState()?.path == url.path }) {
-            existing.showWindow(nil)
-            existing.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
-            return true
-        }
-
-        let title = NoteStorage.noteTitle(from: url)
-        let state = NoteState(id: UUID().uuidString, path: url.path, title: title)
-        open(noteState: state)
+        noteController?.displayNote(at: url)
         saveState()
-        NSApp.activate(ignoringOtherApps: true)
+        menuBarController?.refreshIfVisible()
         return true
     }
 
-    private func saveState() {
-        let notes = controllers.compactMap { $0.currentState() }
-        try? storage.writeState(AppState(notes: notes, showsHoverIcons: showsHoverIcons))
+    private func restoredState(from appState: AppState) -> NoteState? {
+        for storedState in appState.notes.reversed() {
+            guard let existingURL = storage.existingURL(for: storedState) ?? storedState.switcherPaths
+                .map({ URL(fileURLWithPath: $0) })
+                .first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+                continue
+            }
+
+            var state = storedState
+            state.path = existingURL.path
+            state.title = NoteStorage.noteTitle(from: existingURL)
+            if state.title == "Untitled Note" {
+                state.title = storage.randomNoteTitle()
+            }
+            if let renamedURL = try? storage.renameNote(
+                at: URL(fileURLWithPath: state.path),
+                id: state.id,
+                title: state.title
+            ) {
+                state.path = renamedURL.path
+            }
+            state.switcherPaths = []
+            state.floatingAnchor = nil
+            return state
+        }
+        return nil
     }
 
-    private func frontController() -> NoteWindowController? {
-        if let keyController = NSApp.keyWindow?.windowController as? NoteWindowController {
-            return keyController
-        }
-        return controllers.last
+    private func newNoteState(preservingWindowStateFrom oldState: NoteState?) -> NoteState {
+        let id = UUID().uuidString
+        let title = storage.randomNoteTitle()
+        let url = storage.createNoteURL(id: id, title: title)
+        return NoteState(
+            id: id,
+            path: url.path,
+            title: title,
+            frame: oldState?.frame,
+            preset: oldState?.preset ?? NoteWindowController.SizePreset.standard.rawValue,
+            isPinned: oldState?.isPinned ?? false
+        )
+    }
+
+    private func saveState() {
+        let notes = noteController?.currentState().map { [$0] } ?? []
+        try? storage.writeState(AppState(notes: notes, showsHoverIcons: false))
     }
 
     private func makeMainMenu() -> NSMenu {
@@ -172,22 +176,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let appMenuItem = NSMenuItem()
         let appMenu = NSMenu()
-        appMenu.addItem(NSMenuItem(title: "Quit Denote", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        let settings = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showSettings(_:)),
+            keyEquivalent: ","
+        )
+        settings.target = self
+        appMenu.addItem(settings)
+        appMenu.addItem(.separator())
+        appMenu.addItem(NSMenuItem(
+            title: "Quit Denote",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
         appMenuItem.submenu = appMenu
         main.addItem(appMenuItem)
 
         let fileItem = NSMenuItem()
         let file = NSMenu(title: "File")
-        file.addItem(NSMenuItem(title: "New Window", action: #selector(newWindow(_:)), keyEquivalent: "n"))
-        file.addItem(NSMenuItem(title: "New Small Window", action: #selector(newSmallWindow(_:)), keyEquivalent: "N"))
+        let newNote = NSMenuItem(
+            title: "New Note",
+            action: #selector(newNote(_:)),
+            keyEquivalent: "n"
+        )
+        newNote.target = self
+        file.addItem(newNote)
         file.addItem(.separator())
-        let exportMarkdown = NSMenuItem(title: "Export as Markdown...", action: #selector(exportMarkdown(_:)), keyEquivalent: "e")
+        let exportMarkdown = NSMenuItem(
+            title: "Export as Markdown…",
+            action: #selector(exportMarkdown(_:)),
+            keyEquivalent: "e"
+        )
         exportMarkdown.target = self
         file.addItem(exportMarkdown)
-        let exportText = NSMenuItem(title: "Export as Text...", action: #selector(exportText(_:)), keyEquivalent: "")
+        let exportText = NSMenuItem(
+            title: "Export as Text…",
+            action: #selector(exportText(_:)),
+            keyEquivalent: ""
+        )
         exportText.target = self
         file.addItem(exportText)
-        let exportHTML = NSMenuItem(title: "Export as HTML...", action: #selector(exportHTML(_:)), keyEquivalent: "")
+        let exportHTML = NSMenuItem(
+            title: "Export as HTML…",
+            action: #selector(exportHTML(_:)),
+            keyEquivalent: ""
+        )
         exportHTML.target = self
         file.addItem(exportHTML)
         fileItem.submenu = file
@@ -201,7 +234,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         edit.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
         edit.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         edit.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
-        let pasteWithoutFormatting = NSMenuItem(title: "Paste Without Formatting", action: #selector(AppDelegate.pasteWithoutFormatting(_:)), keyEquivalent: "V")
+        let pasteWithoutFormatting = NSMenuItem(
+            title: "Paste Without Formatting",
+            action: #selector(pasteWithoutFormatting(_:)),
+            keyEquivalent: "V"
+        )
         pasteWithoutFormatting.target = self
         edit.addItem(pasteWithoutFormatting)
         editItem.submenu = edit
@@ -209,11 +246,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let windowItem = NSMenuItem()
         let window = NSMenu(title: "Window")
-        window.addItem(NSMenuItem(title: "Toggle Window Size", action: #selector(NoteWindowController.toggleSizePreset(_:)), keyEquivalent: ""))
-        window.addItem(NSMenuItem(title: "Toggle Always Hover", action: #selector(NoteWindowController.togglePinned(_:)), keyEquivalent: "p"))
+        let showHide = NSMenuItem(
+            title: "Show or Hide Note",
+            action: #selector(toggleNoteWindow(_:)),
+            keyEquivalent: ""
+        )
+        showHide.target = self
+        window.addItem(showHide)
+        window.addItem(NSMenuItem(
+            title: "Toggle Window Size",
+            action: #selector(NoteWindowController.toggleSizePreset(_:)),
+            keyEquivalent: ""
+        ))
+        window.addItem(NSMenuItem(
+            title: "Toggle Always Hover",
+            action: #selector(NoteWindowController.togglePinned(_:)),
+            keyEquivalent: "p"
+        ))
         windowItem.submenu = window
         main.addItem(windowItem)
 
         return main
     }
+}
+
+private func initialStateURLFallback() -> URL {
+    FileManager.default.homeDirectoryForCurrentUser
+        .appendingPathComponent("Documents")
+        .appendingPathComponent("Denote")
+        .appendingPathComponent("Untitled Note.note.json")
 }

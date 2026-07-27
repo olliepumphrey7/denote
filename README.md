@@ -1,6 +1,6 @@
 # Denote
 
-Denote is a small native macOS notes app for focused working notes: keep notes pinned or compact while you work; capture ideas with local voice transcription; paste rich content without losing structure; and export cleanly to Markdown or HTML.
+Denote is a small native macOS menu-bar notes app for focused working notes: summon one note window from anywhere, keep it pinned or compact while you work, capture ideas with local voice transcription, and export cleanly to Markdown or HTML.
 
 Notes are saved in:
 
@@ -16,11 +16,20 @@ App window state is saved in:
 
 ## Features
 
+### Open from anywhere
+
+- Right-click the wide Denote menu-bar item to see the five most recently edited notes, with older notes in a native More Notes submenu.
+- Create a new note from the top of the native menu.
+- Left-click the menu-bar item or press `Option-Space` to show or hide the note window.
+- Use the note-title chevron in the window toolbar to create, rename, or switch notes without opening the menu-bar menu.
+- Change the global shortcut from Denote Settings.
+- Work with one note window at a time; selecting or creating a note swaps the document in that window.
+
 ### Stay visible
 
-- Pin any note above other windows with the always-hover toggle.
-- Toggle each window between standard and small modes.
-- Restore open note windows automatically when Denote relaunches.
+- Pin the note window above other windows with the always-hover toggle.
+- Toggle the window between standard and small modes.
+- Restore the active note and window position when Denote relaunches.
 
 ### Capture quickly
 

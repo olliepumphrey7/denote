@@ -23,6 +23,7 @@ let package = Package(
             ],
             linkerSettings: [
                 .linkedFramework("AVFoundation"),
+                .linkedFramework("Carbon"),
                 .linkedFramework("WebKit")
             ]
         ),
