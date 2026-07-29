@@ -4,6 +4,10 @@ import DenoteCore
 @MainActor
 final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFieldDelegate {
     private static let minimumWindowSize = NSSize(width: 260, height: 260)
+    private static let toolbarSymbolConfiguration = NSImage.SymbolConfiguration(
+        pointSize: 12,
+        weight: .regular
+    )
 
     enum SizePreset: String {
         case standard
@@ -333,6 +337,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         titleMicrophoneButton.target = self
         titleMicrophoneButton.action = #selector(toggleVoiceTranscription(_:))
         titleMicrophoneButton.setAccessibilityLabel("Voice Transcription")
+        titleMicrophoneButton.configureMacAppearance()
         updateMicButton()
         updateTitleButton()
     }
@@ -505,7 +510,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         guard let pinButton else { return }
         let label = isPinned ? "Always Hover On" : "Always Hover Off"
         pinButton.state = isPinned ? .on : .off
-        pinButton.image = NSImage(systemSymbolName: isPinned ? "pin.fill" : "pin", accessibilityDescription: label)
+        pinButton.image = Self.toolbarImage(
+            isPinned ? "pin.fill" : "pin",
+            accessibilityDescription: label
+        )
         pinButton.contentTintColor = isPinned ? .controlAccentColor : .secondaryLabelColor
         pinButton.toolTip = label
     }
@@ -513,9 +521,10 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private func updateSizeButton() {
         guard let sizeButton else { return }
         let label = "Window Size: \(preset.label)"
-        sizeButton.image = NSImage(systemSymbolName: preset.symbolName, accessibilityDescription: label)
-            ?? NSImage(systemSymbolName: "rectangle", accessibilityDescription: label)
-            ?? NSImage()
+        sizeButton.image = Self.toolbarImage(
+            preset.symbolName,
+            accessibilityDescription: label
+        )
         sizeButton.toolTip = label
     }
 
@@ -548,8 +557,8 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
             isEnabled = true
         }
 
-        titleMicrophoneButton.image = NSImage(
-            systemSymbolName: symbol,
+        titleMicrophoneButton.image = Self.toolbarImage(
+            symbol,
             accessibilityDescription: label
         )
         titleMicrophoneButton.contentTintColor = tint
@@ -575,6 +584,20 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     private static func safeFileName(_ value: String) -> String {
         NoteStorage.safeFileName(value)
+    }
+
+    private static func toolbarImage(
+        _ symbolName: String,
+        accessibilityDescription: String
+    ) -> NSImage {
+        let image = NSImage(
+            systemSymbolName: symbolName,
+            accessibilityDescription: accessibilityDescription
+        ) ?? NSImage(
+            systemSymbolName: "circle",
+            accessibilityDescription: accessibilityDescription
+        ) ?? NSImage()
+        return image.withSymbolConfiguration(toolbarSymbolConfiguration) ?? image
     }
 
     private static func fullHTMLDocument(body: String, title: String) -> String {
@@ -695,11 +718,12 @@ extension NoteWindowController: NSToolbarDelegate {
         item.paletteLabel = "Minimise to Notch"
         item.toolTip = "Minimise to Notch"
         item.visibilityPriority = .high
+        item.isBordered = false
 
-        let image = NSImage(
-            systemSymbolName: "minus",
+        let image = Self.toolbarImage(
+            "minus",
             accessibilityDescription: "Minimise to Notch"
-        ) ?? NSImage()
+        )
         let button = HoverButton(
             image: image,
             target: self,
@@ -715,6 +739,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.label = "Size"
         item.paletteLabel = "Toggle Window Size"
         item.visibilityPriority = .high
+        item.isBordered = false
 
         let button = HoverButton(image: NSImage(), target: self, action: #selector(toggleSizePreset(_:)))
         styleToolbarButton(button)
@@ -731,6 +756,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.label = "Always Hover"
         item.paletteLabel = "Always Hover"
         item.visibilityPriority = .standard
+        item.isBordered = false
 
         let button = HoverButton(image: NSImage(), target: self, action: #selector(togglePinned(_:)))
         button.setButtonType(.toggle)
@@ -748,6 +774,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.label = "Note Title"
         item.paletteLabel = "Note Title"
         item.visibilityPriority = .high
+        item.isBordered = false
 
         configureTitleControls()
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 150, height: 24))
@@ -774,8 +801,8 @@ extension NoteWindowController: NSToolbarDelegate {
             titleMicrophoneButton.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 2),
             titleMicrophoneButton.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             titleMicrophoneButton.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            titleMicrophoneButton.widthAnchor.constraint(equalToConstant: 20),
-            titleMicrophoneButton.heightAnchor.constraint(equalToConstant: 20)
+            titleMicrophoneButton.widthAnchor.constraint(equalToConstant: 28),
+            titleMicrophoneButton.heightAnchor.constraint(equalToConstant: 24)
         ])
 
         item.view = container
@@ -787,26 +814,41 @@ extension NoteWindowController: NSToolbarDelegate {
         item.label = "Export"
         item.paletteLabel = "Export"
         item.toolTip = "Export"
+        item.isBordered = false
 
-        let button = HoverButton(image: NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export") ?? NSImage(), target: self, action: #selector(showExportMenu(_:)))
+        let button = HoverButton(
+            image: Self.toolbarImage(
+                "square.and.arrow.up",
+                accessibilityDescription: "Export"
+            ),
+            target: self,
+            action: #selector(showExportMenu(_:))
+        )
         styleToolbarButton(button)
 
-        item.view = button
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 46, height: 24))
+        container.translatesAutoresizingMaskIntoConstraints = false
+        button.removeFromSuperview()
+        container.addSubview(button)
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(equalToConstant: 46),
+            container.heightAnchor.constraint(equalToConstant: 24),
+            button.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            button.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+
+        item.view = container
         item.visibilityPriority = .low
         return item
     }
 
-    private func styleToolbarButton(_ button: NSButton) {
-        button.isBordered = false
-        button.bezelStyle = .inline
-        button.imagePosition = .imageOnly
-        button.controlSize = .small
-        button.imageScaling = .scaleProportionallyDown
+    private func styleToolbarButton(_ button: HoverButton) {
         button.contentTintColor = DenoteWindowPalette.secondaryText
+        button.configureMacAppearance()
         button.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            button.widthAnchor.constraint(equalToConstant: 30),
-            button.heightAnchor.constraint(equalToConstant: 26)
+            button.widthAnchor.constraint(equalToConstant: 28),
+            button.heightAnchor.constraint(equalToConstant: 24)
         ])
     }
 }
@@ -843,6 +885,24 @@ private enum DenoteWindowPalette {
 @MainActor
 private final class HoverButton: NSButton {
     private var trackingAreaReference: NSTrackingArea?
+    private var isPointerInside = false
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: 28, height: 24)
+    }
+
+    func configureMacAppearance() {
+        isBordered = false
+        bezelStyle = .inline
+        imagePosition = .imageOnly
+        imageScaling = .scaleProportionallyDown
+        controlSize = .small
+        focusRingType = .none
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -860,16 +920,29 @@ private final class HoverButton: NSButton {
 
     override func mouseEntered(with event: NSEvent) {
         guard isEnabled else { return }
-        wantsLayer = true
-        layer?.cornerRadius = 6
-        layer?.cornerCurve = .continuous
-        layer?.backgroundColor = NSColor.controlAccentColor
-            .withAlphaComponent(0.14)
-            .cgColor
+        isPointerInside = true
+        applyUnderlay(alpha: 0.13)
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor.clear.cgColor
+        isPointerInside = false
+        applyUnderlay(alpha: 0)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard isEnabled else {
+            super.mouseDown(with: event)
+            return
+        }
+        applyUnderlay(alpha: 0.22)
+        super.mouseDown(with: event)
+        applyUnderlay(alpha: isPointerInside ? 0.13 : 0)
+    }
+
+    private func applyUnderlay(alpha: CGFloat) {
+        layer?.backgroundColor = alpha == 0
+            ? NSColor.clear.cgColor
+            : NSColor.systemGray.withAlphaComponent(alpha).cgColor
     }
 }
 
