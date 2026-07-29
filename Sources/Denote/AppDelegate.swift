@@ -121,9 +121,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
 
+        closeNotchTrays()
         noteController?.displayNote(at: url)
         saveState()
-        closeNotchTrays()
         refreshNotches()
         return true
     }
@@ -170,6 +170,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 onOpenNote: { [weak self] url in
                     self?.openNote(at: url)
                 },
+                onArchiveNote: { [weak self] url in
+                    self?.archiveNote(at: url)
+                },
                 onOpenSettings: { [weak self] in
                     self?.showSettings(nil)
                 }
@@ -183,6 +186,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func closeNotchTrays() {
         notchControllers.forEach { $0.closeTray() }
+    }
+
+    private func archiveNote(at url: URL) {
+        closeNotchTrays()
+        do {
+            if noteController?.currentNoteURL.standardizedFileURL == url.standardizedFileURL {
+                try noteController?.archiveCurrentNote()
+            } else {
+                try storage.archiveNote(at: url)
+            }
+            saveState()
+            refreshNotches()
+        } catch {
+            let alert = NSAlert(error: error)
+            alert.messageText = "The note couldn’t be archived"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
     }
 
     private func restoredState(from appState: AppState) -> NoteState? {

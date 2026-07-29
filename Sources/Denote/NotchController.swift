@@ -18,6 +18,7 @@ final class NotchController: NSObject {
     private let onHideWindow: () -> Void
     private let onNewNote: () -> Void
     private let onOpenNote: (URL) -> Void
+    private let onArchiveNote: (URL) -> Void
     private let onOpenSettings: () -> Void
     private let screenNumber: NSNumber
     private let syntheticMenuBarHeight: CGFloat
@@ -41,6 +42,7 @@ final class NotchController: NSObject {
         onHideWindow: @escaping () -> Void,
         onNewNote: @escaping () -> Void,
         onOpenNote: @escaping (URL) -> Void,
+        onArchiveNote: @escaping (URL) -> Void,
         onOpenSettings: @escaping () -> Void
     ) {
         self.storage = storage
@@ -52,6 +54,7 @@ final class NotchController: NSObject {
         self.onHideWindow = onHideWindow
         self.onNewNote = onNewNote
         self.onOpenNote = onOpenNote
+        self.onArchiveNote = onArchiveNote
         self.onOpenSettings = onOpenSettings
         self.screenNumber = Self.screenNumber(for: screen)
         self.syntheticMenuBarHeight = Self.menuBarHeight(for: screen)
@@ -80,6 +83,12 @@ final class NotchController: NSObject {
         islandView.onOpenNote = { [weak self] url in
             guard let self else { return }
             self.onOpenNote(url)
+            self.collapse()
+            self.refresh()
+        }
+        islandView.onArchiveNote = { [weak self] url in
+            guard let self else { return }
+            self.onArchiveNote(url)
             self.collapse()
             self.refresh()
         }
@@ -428,6 +437,7 @@ private final class NotchIslandView: NSView {
     var onToggleCurrentNote: (() -> Void)?
     var onNewNote: (() -> Void)?
     var onOpenNote: ((URL) -> Void)?
+    var onArchiveNote: ((URL) -> Void)?
     var onMinimiseCurrentNote: (() -> Void)?
     var onShowContextMenu: ((NSEvent, NSView) -> Void)?
 
@@ -537,7 +547,7 @@ private final class NotchIslandView: NSView {
         )
 
         if notes.isEmpty {
-            let empty = NSTextField(labelWithString: "No saved notes yet")
+            let empty = MousePassthroughTextField(labelWithString: "No saved notes yet")
             empty.font = NSFont.systemFont(ofSize: 13, weight: .medium)
             empty.textColor = NSColor(calibratedWhite: 0.58, alpha: 1)
             empty.frame = NSRect(x: 8, y: 36, width: 220, height: 22)
@@ -559,6 +569,10 @@ private final class NotchIslandView: NSView {
             )
             card.target = self
             card.action = #selector(cardPressed(_:))
+            card.onArchive = { [weak self, weak card] in
+                guard let self, let card else { return }
+                self.confirmArchive(card)
+            }
             cardDocumentView.addSubview(card)
         }
     }
@@ -605,11 +619,24 @@ private final class NotchIslandView: NSView {
             onOpenNote?(sender.noteURL)
         }
     }
+
+    private func confirmArchive(_ card: NotchNoteCard) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Archive “\(card.noteTitle)”?"
+        alert.informativeText = "Are you sure? The note will be moved to the Archive folder and can be recovered later."
+        alert.addButton(withTitle: "Archive Note")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        onArchiveNote?(card.noteURL)
+    }
 }
 
 @MainActor
 private final class IslandIconButton: NSButton {
     private let symbolName: String
+    private var trackingAreaReference: NSTrackingArea?
 
     init(symbolName: String, accessibilityLabel: String) {
         self.symbolName = symbolName
@@ -638,16 +665,42 @@ private final class IslandIconButton: NSButton {
         layer?.borderWidth = 0
         layer?.borderColor = NSColor.clear.cgColor
     }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.white.withAlphaComponent(0.14).cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
 }
 
 @MainActor
 private final class NotchNoteCard: NSButton {
     let noteURL: URL
+    let noteTitle: String
     let showsMinimise: Bool
+    var onArchive: (() -> Void)?
     private var trackingAreaReference: NSTrackingArea?
+    private let archiveButton = NSButton()
 
     init(note: NoteStorage.RecentNote, showsMinimise: Bool) {
         self.noteURL = note.url
+        self.noteTitle = note.title
         self.showsMinimise = showsMinimise
         super.init(frame: .zero)
 
@@ -660,15 +713,16 @@ private final class NotchNoteCard: NSButton {
         layer?.cornerRadius = 14
         layer?.cornerCurve = .continuous
 
+        configureNoteContent(note)
         if showsMinimise {
-            configureMinimiseContent()
+            configureMinimiseOverlay()
             setAccessibilityLabel("Minimise \(note.title)")
             toolTip = "Minimise \(note.title)"
         } else {
-            configureNoteContent(note)
             setAccessibilityLabel("Open \(note.title)")
             toolTip = "Open \(note.title)"
         }
+        configureArchiveButton()
     }
 
     required init?(coder: NSCoder) {
@@ -690,61 +744,177 @@ private final class NotchNoteCard: NSButton {
         trackingAreaReference = tracking
     }
 
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        addCursorRect(bounds, cursor: .openHand)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let window,
+              let scrollView = enclosingScrollView as? HorizontalNotchScrollView else {
+            super.mouseDown(with: event)
+            return
+        }
+
+        let start = event.locationInWindow
+        var previous = start
+        var isDragging = false
+
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            switch next.type {
+            case .leftMouseDragged:
+                let current = next.locationInWindow
+                let totalX = current.x - start.x
+                let totalY = current.y - start.y
+                if isDragging == false,
+                   sqrt(totalX * totalX + totalY * totalY) >= 4 {
+                    isDragging = true
+                    scrollView.beginCardDrag()
+                    NSCursor.closedHand.set()
+                }
+                if isDragging {
+                    scrollView.scrollByDragging(deltaX: current.x - previous.x)
+                }
+                previous = current
+
+            case .leftMouseUp:
+                NSCursor.openHand.set()
+                if isDragging {
+                    scrollView.endCardDrag()
+                }
+                if isDragging == false,
+                   bounds.contains(convert(next.locationInWindow, from: nil)),
+                   let action {
+                    NSApp.sendAction(action, to: target, from: self)
+                }
+                return
+
+            default:
+                break
+            }
+        }
+        if isDragging {
+            scrollView.endCardDrag()
+        }
+        NSCursor.openHand.set()
+    }
+
     override func mouseEntered(with event: NSEvent) {
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.13, alpha: 1).cgColor
-        layer?.borderColor = NSColor(calibratedWhite: 0.34, alpha: 1).cgColor
+        if let scrollView = enclosingScrollView as? HorizontalNotchScrollView {
+            scrollView.setHoveredCard(self)
+        } else {
+            setHovered(true)
+        }
     }
 
     override func mouseExited(with event: NSEvent) {
-        layer?.backgroundColor = NSColor(calibratedWhite: 0.085, alpha: 1).cgColor
-        layer?.borderColor = NSColor(calibratedWhite: 0.19, alpha: 1).cgColor
+        setHovered(false)
     }
 
-    private func configureMinimiseContent() {
-        let cross = NSTextField(labelWithString: "×")
-        cross.font = NSFont.systemFont(ofSize: 38, weight: .light)
+    fileprivate func setHovered(_ hovered: Bool) {
+        highlight(false)
+        layer?.backgroundColor = NSColor(
+            calibratedWhite: hovered ? 0.13 : 0.085,
+            alpha: 1
+        ).cgColor
+        layer?.borderColor = NSColor(
+            calibratedWhite: hovered ? 0.34 : 0.19,
+            alpha: 1
+        ).cgColor
+
+        if hovered {
+            archiveButton.isHidden = false
+            archiveButton.alphaValue = 0
+            archiveButton.animator().alphaValue = 1
+            return
+        }
+
+        archiveButton.animator().alphaValue = 0
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+            guard let self, self.archiveButton.alphaValue < 0.1 else { return }
+            self.archiveButton.isHidden = true
+        }
+    }
+
+    private func configureMinimiseOverlay() {
+        let overlay = MousePassthroughView()
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.48).cgColor
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+
+        let cross = MousePassthroughTextField(labelWithString: "×")
+        cross.font = NSFont.systemFont(ofSize: 42, weight: .light)
         cross.textColor = .white
         cross.alignment = .center
         cross.translatesAutoresizingMaskIntoConstraints = false
 
-        let label = NSTextField(labelWithString: "Minimise")
-        label.font = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-        label.textColor = NSColor(calibratedWhite: 0.82, alpha: 1)
-        label.alignment = .center
-        label.translatesAutoresizingMaskIntoConstraints = false
-
+        addSubview(overlay)
         addSubview(cross)
-        addSubview(label)
         NSLayoutConstraint.activate([
+            overlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            overlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+            overlay.topAnchor.constraint(equalTo: topAnchor),
+            overlay.bottomAnchor.constraint(equalTo: bottomAnchor),
             cross.centerXAnchor.constraint(equalTo: centerXAnchor),
-            cross.topAnchor.constraint(equalTo: topAnchor, constant: 18),
+            cross.centerYAnchor.constraint(equalTo: centerYAnchor, constant: -1),
             cross.widthAnchor.constraint(equalToConstant: 70),
-            cross.heightAnchor.constraint(equalToConstant: 48),
-            label.centerXAnchor.constraint(equalTo: centerXAnchor),
-            label.topAnchor.constraint(equalTo: cross.bottomAnchor, constant: 4)
+            cross.heightAnchor.constraint(equalToConstant: 54)
         ])
     }
 
+    private func configureArchiveButton() {
+        let image = NSImage(
+            systemSymbolName: "archivebox",
+            accessibilityDescription: "Archive \(noteTitle)"
+        )
+        archiveButton.image = image
+        archiveButton.imagePosition = .imageOnly
+        archiveButton.isBordered = false
+        archiveButton.bezelStyle = .inline
+        archiveButton.contentTintColor = .white
+        archiveButton.wantsLayer = true
+        archiveButton.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.68).cgColor
+        archiveButton.layer?.cornerRadius = 6
+        archiveButton.alphaValue = 0
+        archiveButton.isHidden = true
+        archiveButton.toolTip = "Archive \(noteTitle)"
+        archiveButton.setAccessibilityLabel("Archive \(noteTitle)")
+        archiveButton.target = self
+        archiveButton.action = #selector(archivePressed(_:))
+        archiveButton.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(archiveButton)
+        NSLayoutConstraint.activate([
+            archiveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -7),
+            archiveButton.topAnchor.constraint(equalTo: topAnchor, constant: 7),
+            archiveButton.widthAnchor.constraint(equalToConstant: 25),
+            archiveButton.heightAnchor.constraint(equalToConstant: 25)
+        ])
+    }
+
+    @objc private func archivePressed(_ sender: NSButton) {
+        onArchive?()
+    }
+
     private func configureNoteContent(_ note: NoteStorage.RecentNote) {
-        let dot = NSView()
+        let dot = MousePassthroughView()
         dot.wantsLayer = true
         dot.layer?.backgroundColor = accentColor(for: note.title).cgColor
         dot.layer?.cornerRadius = 3.5
         dot.translatesAutoresizingMaskIntoConstraints = false
 
-        let title = NSTextField(labelWithString: note.title)
+        let title = MousePassthroughTextField(labelWithString: note.title)
         title.font = NSFont.systemFont(ofSize: 13, weight: .semibold)
         title.textColor = .white
         title.lineBreakMode = .byTruncatingTail
         title.translatesAutoresizingMaskIntoConstraints = false
 
-        let time = NSTextField(labelWithString: timeLabel(for: note.modifiedAt))
+        let time = MousePassthroughTextField(labelWithString: timeLabel(for: note.modifiedAt))
         time.font = NSFont.systemFont(ofSize: 10.5, weight: .regular)
         time.textColor = NSColor(calibratedWhite: 0.55, alpha: 1)
         time.translatesAutoresizingMaskIntoConstraints = false
 
         let previewText = note.preview.isEmpty ? "No preview yet" : note.preview
-        let preview = NSTextField(wrappingLabelWithString: previewText)
+        let preview = MousePassthroughTextField(wrappingLabelWithString: previewText)
         preview.font = NSFont.systemFont(ofSize: 11.5, weight: .regular)
         preview.textColor = NSColor(calibratedWhite: 0.7, alpha: 1)
         preview.maximumNumberOfLines = 2
@@ -759,7 +929,7 @@ private final class NotchNoteCard: NSButton {
             dot.heightAnchor.constraint(equalToConstant: 7),
 
             title.leadingAnchor.constraint(equalTo: dot.trailingAnchor, constant: 8),
-            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -38),
             title.centerYAnchor.constraint(equalTo: dot.centerYAnchor),
 
             time.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 14),
@@ -801,8 +971,48 @@ private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
 
+private final class MousePassthroughView: NSView {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+}
+
+private final class MousePassthroughTextField: NSTextField {
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func resetCursorRects() {}
+}
+
 private final class HorizontalNotchScrollView: NSScrollView {
+    private var isDraggingCards = false
+    private var isScrollingCards = false
+    private var scrollHighlightWorkItem: DispatchWorkItem?
+
+    func setHoveredCard(_ hoveredCard: NotchNoteCard?) {
+        guard isDraggingCards == false, isScrollingCards == false else { return }
+        updateCardHighlights(hoveredCard)
+    }
+
+    func beginCardDrag() {
+        isDraggingCards = true
+        updateCardHighlights(nil)
+    }
+
+    func endCardDrag() {
+        updateCardHighlights(nil)
+        isDraggingCards = false
+    }
+
+    func scrollByDragging(deltaX: CGFloat) {
+        var origin = contentView.bounds.origin
+        origin.x -= deltaX
+        setHorizontalOrigin(origin.x)
+    }
+
     override func scrollWheel(with event: NSEvent) {
+        suppressHighlightsWhileScrolling()
         guard let contentView = contentView as NSClipView? else {
             super.scrollWheel(with: event)
             return
@@ -814,9 +1024,47 @@ private final class HorizontalNotchScrollView: NSScrollView {
         let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 24
         var origin = contentView.bounds.origin
         origin.x -= horizontalDelta * multiplier
+        setHorizontalOrigin(origin.x)
+    }
+
+    private func setHorizontalOrigin(_ proposedX: CGFloat) {
         let maxX = max(0, (documentView?.bounds.width ?? 0) - contentView.bounds.width)
-        origin.x = min(max(origin.x, 0), maxX)
+        var origin = contentView.bounds.origin
+        origin.x = min(max(proposedX, 0), maxX)
         contentView.setBoundsOrigin(origin)
         reflectScrolledClipView(contentView)
+    }
+
+    private func suppressHighlightsWhileScrolling() {
+        isScrollingCards = true
+        updateCardHighlights(nil)
+        scrollHighlightWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.isScrollingCards = false
+            self.updateCardHighlights(self.cardUnderPointer())
+        }
+        scrollHighlightWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.16, execute: workItem)
+    }
+
+    private func cardUnderPointer() -> NotchNoteCard? {
+        guard let window, let documentView else { return nil }
+        let pointInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let pointInScrollView = convert(pointInWindow, from: nil)
+        guard bounds.contains(pointInScrollView) else { return nil }
+
+        let pointInDocument = documentView.convert(pointInWindow, from: nil)
+        return documentView.subviews
+            .compactMap { $0 as? NotchNoteCard }
+            .first { $0.frame.contains(pointInDocument) }
+    }
+
+    private func updateCardHighlights(_ hoveredCard: NotchNoteCard?) {
+        documentView?.subviews.forEach { view in
+            guard let card = view as? NotchNoteCard else { return }
+            card.setHovered(card === hoveredCard)
+        }
     }
 }

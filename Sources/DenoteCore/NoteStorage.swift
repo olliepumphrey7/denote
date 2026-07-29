@@ -163,6 +163,9 @@ public final class NoteStorage: @unchecked Sendable {
 
     public let notesDirectory: URL
     public let stateURL: URL
+    public var archiveDirectory: URL {
+        notesDirectory.appendingPathComponent("Archive", isDirectory: true)
+    }
     private static let adjectives = [
         "Amber", "Bright", "Calm", "Clever", "Copper", "Gentle", "Golden", "Hidden",
         "Quiet", "Silver", "Steady", "Swift", "True", "Velvet", "Warm", "Wild"
@@ -274,6 +277,23 @@ public final class NoteStorage: @unchecked Sendable {
         return target
     }
 
+    @discardableResult
+    public func archiveNote(at url: URL) throws -> URL {
+        try prepare()
+        try FileManager.default.createDirectory(
+            at: archiveDirectory,
+            withIntermediateDirectories: true
+        )
+
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+
+        let target = uniqueArchivedURL(for: url)
+        try FileManager.default.moveItem(at: url, to: target)
+        return target
+    }
+
     public func readState() -> AppState {
         guard let data = try? Data(contentsOf: stateURL),
               let state = try? JSONDecoder().decode(AppState.self, from: data) else {
@@ -325,6 +345,23 @@ public final class NoteStorage: @unchecked Sendable {
         var index = 2
         while FileManager.default.fileExists(atPath: candidate.path), candidate != existingURL {
             candidate = notesDirectory.appendingPathComponent("\(baseName) \(index).note.json")
+            index += 1
+        }
+        return candidate
+    }
+
+    private func uniqueArchivedURL(for url: URL) -> URL {
+        let fileName = url.lastPathComponent
+        let fileExtension = ".note.json"
+        let baseName = fileName.hasSuffix(fileExtension)
+            ? String(fileName.dropLast(fileExtension.count))
+            : url.deletingPathExtension().lastPathComponent
+        var candidate = archiveDirectory.appendingPathComponent(fileName)
+        var index = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = archiveDirectory.appendingPathComponent(
+                "\(baseName) \(index)\(fileExtension)"
+            )
             index += 1
         }
         return candidate

@@ -99,6 +99,12 @@ try FileManager.default.setAttributes([.modificationDate: calendar.date(byAdding
 let recent = recentStorage.recentNotes(limit: 3)
 check(recent.map(\.title) == ["Newest Note", "Middle Note", "Old Note"], "Recent notes are sorted and limited; got \(recent.map(\.title))")
 
+let archivedURL = try recentStorage.archiveNote(at: middleURL)
+check(!FileManager.default.fileExists(atPath: middleURL.path), "Archiving removes the note from the live notes folder")
+check(FileManager.default.fileExists(atPath: archivedURL.path), "Archiving preserves the note in the Archive folder")
+check(archivedURL.deletingLastPathComponent() == recentStorage.archiveDirectory, "Archived notes use the Archive folder")
+check(!recentStorage.recentNotes(limit: 10).map(\.title).contains("Middle Note"), "Archived notes leave the recent-note tray")
+
 func jsonString(_ object: Any) -> String {
     let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     return String(data: data, encoding: .utf8)!

@@ -49,7 +49,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private let editorView = BlockEditorView()
     private let voiceTranscriber = VoiceTranscriber()
     private let titleLabel = DraggableTitleLabel()
-    private let titleMicrophoneButton = NSButton()
+    private let titleMicrophoneButton = HoverButton()
     private let titleField = NSTextField()
     private weak var sizeButton: NSButton?
     private weak var pinButton: NSButton?
@@ -58,6 +58,7 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
     private var preset: SizePreset
     private var isPinned: Bool
     private var autosaveTimer: Timer?
+    private var previouslyFocusedApplication: NSRunningApplication?
 
     init(
         storage: NoteStorage,
@@ -368,6 +369,21 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
         showAndActivate()
     }
 
+    func archiveCurrentNote() throws {
+        autosaveTimer?.invalidate()
+        saveNow()
+        try storage.archiveNote(at: noteURL)
+
+        noteID = UUID().uuidString
+        noteTitle = storage.randomNoteTitle()
+        noteURL = storage.createNoteURL(id: noteID, title: noteTitle)
+        updateTitleButton()
+        window?.title = noteTitle
+        editorView.load(document: EditorDocument())
+        onChange()
+        hideWindow()
+    }
+
     func toggleVisibility() {
         guard let window else { return }
         if window.isVisible, NSApp.isActive, window.isKeyWindow {
@@ -379,17 +395,31 @@ final class NoteWindowController: NSWindowController, NSWindowDelegate, NSTextFi
 
     func showAndActivate() {
         guard let window else { return }
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+            previouslyFocusedApplication = frontmost
+        }
         if window.isMiniaturized {
             window.deminiaturize(nil)
         }
+        window.orderFrontRegardless()
         showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { [weak window] in
+            guard let window else { return }
+            window.orderFrontRegardless()
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     func hideWindow() {
         saveNow()
         window?.orderOut(nil)
+        if let previous = previouslyFocusedApplication,
+           previous.isTerminated == false {
+            previous.activate(options: [.activateAllWindows])
+        }
     }
 
     func saveCurrentNote() {
@@ -670,7 +700,7 @@ extension NoteWindowController: NSToolbarDelegate {
             systemSymbolName: "minus",
             accessibilityDescription: "Minimise to Notch"
         ) ?? NSImage()
-        let button = NSButton(
+        let button = HoverButton(
             image: image,
             target: self,
             action: #selector(minimiseToNotch(_:))
@@ -686,7 +716,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.paletteLabel = "Toggle Window Size"
         item.visibilityPriority = .high
 
-        let button = NSButton(image: NSImage(), target: self, action: #selector(toggleSizePreset(_:)))
+        let button = HoverButton(image: NSImage(), target: self, action: #selector(toggleSizePreset(_:)))
         styleToolbarButton(button)
 
         sizeButton = button
@@ -702,7 +732,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.paletteLabel = "Always Hover"
         item.visibilityPriority = .standard
 
-        let button = NSButton(image: NSImage(), target: self, action: #selector(togglePinned(_:)))
+        let button = HoverButton(image: NSImage(), target: self, action: #selector(togglePinned(_:)))
         button.setButtonType(.toggle)
         styleToolbarButton(button)
 
@@ -758,7 +788,7 @@ extension NoteWindowController: NSToolbarDelegate {
         item.paletteLabel = "Export"
         item.toolTip = "Export"
 
-        let button = NSButton(image: NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export") ?? NSImage(), target: self, action: #selector(showExportMenu(_:)))
+        let button = HoverButton(image: NSImage(systemSymbolName: "square.and.arrow.up", accessibilityDescription: "Export") ?? NSImage(), target: self, action: #selector(showExportMenu(_:)))
         styleToolbarButton(button)
 
         item.view = button
@@ -808,6 +838,39 @@ private enum DenoteWindowPalette {
         blue: 0.42,
         alpha: 1
     )
+}
+
+@MainActor
+private final class HoverButton: NSButton {
+    private var trackingAreaReference: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingAreaReference {
+            removeTrackingArea(trackingAreaReference)
+        }
+        let tracking = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self
+        )
+        addTrackingArea(tracking)
+        trackingAreaReference = tracking
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        guard isEnabled else { return }
+        wantsLayer = true
+        layer?.cornerRadius = 6
+        layer?.cornerCurve = .continuous
+        layer?.backgroundColor = NSColor.controlAccentColor
+            .withAlphaComponent(0.14)
+            .cgColor
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
 }
 
 @MainActor
